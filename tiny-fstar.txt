@@ -1,0 +1,2773 @@
+Syntax:
+
+  i ::= 0 | 1 | -1 | ...                 // integers
+
+  c ::= () | i | l | (!) | (:=) | sel | upd // constants
+
+  v ::=                                   // values
+     | x                                  // variable  (because we consider open CBV reductions)
+     | c                                  // constant
+     | fun (x:t) -> e                     // lambda
+     | let rec (f^d:t) x = e              // fixpoint
+     | (:=) v                             // partially applied write
+     | sel v1 | sel v1 v2                 // applied sel
+     | upd v1 | upd v1 v2 | upd v1 v2 v3  // applied upd
+
+  e ::=                                   // expressions
+     | x                                  // variable
+     | v                                  // value
+     | e1 e2                              // application
+     | if0 e then e1 else e2              // zero test
+
+  d ::= epsilon | e                       // optional metric
+
+  M ::= PURE | ALL                        // effects
+
+  T ::=                                   // type constants
+     | unit | int | ref int | heap        // some type constants
+     | true | false | and | or | impl     // some logical constants
+     | forall                             // forall over expressions of a type
+     | forall_k                           // forall over the types with kind k
+     | eq                                 // expression equality
+     | eq_k                               // type equality at kind k
+     | precedes                           // well-founded ordering
+
+  t,phi,wp ::=                            // types
+     | a                                  // type variable
+     | T                                  // type constant
+     | x:t1 -> M t2 phi                   // dependent function type
+     | fun (a:k) -> t                     // type-to-type function
+     | fun (x:t1) -> t2                   // expression-to-type function
+     | t1 t2                              // type applied to type
+     | t e                                // type applied to expression
+
+  k ::=                                   // kinds
+     | Type                               // regular types
+     | a:k -> k'                          // type-indexed type constructor
+     | x:t -> k'                          // expression-indexed type constructor
+
+================================================================================
+
+Reduction:
+
+We have 3 judgments:
+
+  t ~> t' and e ~> e' - are mutually inductively defined and evaluate
+                        types and pure expressions
+                        (e ~> e' is really just an auxiliary for defining
+                         type reduction and thus type conversion)
+
+  (H,e) ~> (H',e') - evaluates expressions, including impure ones
+                     using call-by-value reduction (the small-step
+                     operational semantics of F*)
+
+  ___________________________
+ |                           |
+ | t ~> t'  (Type reduction) |
+ |___________________________|
+
+    (fun (x:t) -> t') e ~> t'[e/x]   [TS-EBeta]
+
+    (fun (a:k) -> t') t ~> t'[t/a]   [TS-TBeta]
+
+    t1 ~> t1'
+    ----------------------------------------- [TS-ArrT1]
+    (x:t1 -> M t2 phi) ~> (x:t1' -> M t2 phi)
+
+    t1 ~> t1'
+    --------------- [TS-TAppT1]
+    t1 t2 ~> t1' t2
+
+    t2 ~> t2'
+    --------------- [TS-TAppT2]
+    t1 t2 ~> t1 t2'
+
+    t ~> t'
+    ----------- [TS-EAppT]
+    t e ~> t' e
+
+    e ~> e'
+    ----------- [TS-EAppE]
+    t e ~> t e'
+
+    t ~> t'
+    ------------------------------------- [TS-TLamT]
+    (fun (a:k) -> t) ~> (fun (a:k) -> t')
+
+    t1 ~> t1'
+    ----------------------------------------- [TS-ELamT1]
+    (fun (x:t1) -> t2) ~> (fun (x:t1') -> t2)
+
+  ______________________________________
+ |                                      |
+ | e ~> e'  (Pure expression reduction) |
+ |______________________________________|
+
+    (fun (x:t) -> e) v ~> e[v/x]     [PS-Beta]
+
+    (let rec (f^d:t) x = e) v ~> e[v/x][(let rec (f^d:t) x = e)/f] [PS-LetRec]
+
+    if0 0 then e1 else e2 ~> e1 [PS-If0]
+
+              i <> 0
+    --------------------------- [PS-IfS]
+    if0 i then e1 else e2 ~> e2
+
+    e1 ~> e1'
+    --------------- [PS-AppE1]
+    e1 e2 ~> e1' e2
+
+    e2 ~> e2'
+    --------------- [PS-AppE2]
+    e1 e2 ~> e1 e2'
+
+    t ~> t'
+    ------------------------------------- [PS-LamT]
+    (fun (x:t) -> e) ~> (fun (x:t') -> e)
+
+    t ~> t'
+    --------------------------------------------------- [PS-LetRecT]
+    (let rec (f^d:t) x = e) ~> (let rec (f^d:t') x = e)
+
+    d ~> d'
+    --------------------------------------------------- [PS-LetRecD]
+    (let rec (f^d:t) x = e) ~> (let rec (f^d':t) x = e)
+
+    e0 ~> e0'
+    ----------------------------------------------------- [PS-If0E0]
+    (if0 e0 then e1 else e2) ~> (if0 e0' then e1 else e2)
+
+  ______________________________________________
+ |                                              |
+ | (H, e) ~> (H', e') (Call-by-value reduction) |
+ |______________________________________________|
+
+    H = total function from locations to integers
+
+    (H, !l) ~> (H, H(l)) [IS-Read]
+
+    (H, l := i) ~> (H[l <- i], ())  [IS-Write]
+
+    (H, (fun (x:t) -> e) v) ~> (H, e[v/x])    [IS-Beta]
+
+    (H, (let rec (f^d:t) x = e) v) ~>
+      (H, e[v/x][(let rec (f^d:t) x = e)/f])   [IS-LetRec]
+
+    (H, if0 0 then e1 else e2) ~> (H, e1) [IS-If0]
+    
+                   i <> 0
+    ------------------------------------- [IS-IfS]
+    (H, if0 i then e1 else e2) ~> (H, e2)
+
+    (H, e1) ~> (H', e1')
+    -------------------------- [IS-AppE1]
+    (H, e1 e2) ~> (H', e1' e2)
+
+    (H, e2) ~> (H', e2')
+    ------------------------ [IS-AppE2]
+    (H, v e2) ~> (H', v e2')
+
+    (H, e0) ~> (H', e0')
+    ------------------------------------------------------------ [IS-If0E0]
+    (H, if0 e0 then e1 else e2) ~> (H', if0 e0' then e1 else e2)
+
+================================================================================
+
+Type system:
+
+The type system has 8 mutually inductively defined judgments:
+  (1) expression typing: G |- e : M t wp
+  (2) sub-computation: G |- e : M t wp <: M' t' wp' <== phi
+  (3) sub-typing: G |- t <: t' <== phi
+  (4) kinding: G |- t : k
+  (5) sub-kinding: G |- k <: k' <== phi
+  (6) kind well-formedness: G |- k ok
+  (7) logical validity (including type conversion): G |= t
+  (8) environment well-formedness: G |- ok
+
+--------------------------------------------------------------------------------
+
+Environments are lists of binders:
+
+  G ::= . | G, x:t | G, a:k
+
+--------------------------------------------------------------------------------
+
+Types for expression constants (c : t_c):
+
+            (!) : x:ref int -> ALL int (fun p h -> p (sel h x) h)
+           (:=) : x:ref int -> y:int -> ALL unit (fun p h -> p () (upd h x y))
+            sel : h:heap -> x:ref int -> Tot int
+            upd : h:heap -> x:ref int -> y:int -> Tot heap
+             () : unit
+  0, 1, -1, ... : int
+              l : ref int
+
+  where Tot t = PURE t (fun p -> forall (x:t). p x)
+
+--------------------------------------------------------------------------------
+
+Kinds for type constants (T : k_T):
+
+        unit : Type
+         int : Type
+     ref int : Type
+        heap : Type
+        true : Type
+         and : Type -> Type -> Type
+          or : Type -> Type -> Type
+         not : Type -> Type
+        impl : Type -> Type -> Type
+      forall : a:Type -> (a -> Type) -> Type
+          eq : a:Type -> a -> a -> Type
+    precedes : a:Type -> a -> a -> Type
+        eq_k : a1:k -> a2:k -> Type
+    forall_k : (a:k -> Type) -> Type
+
+Note: because of the lack of kind polymorphism eq_k and forall_k are
+      infinitely many constants, an equality and a universal
+      quantifier for each kind k.
+
+--------------------------------------------------------------------------------
+
+Lattice of effects:
+
+    -- Kinds
+
+    Pre_PURE = Type
+    Pre_ALL  = heap -> Type
+
+    Post_PURE(t) = t -> Type
+    Post_ALL(t) = t -> heap -> Type
+
+    K_M(t) = Post_M(t) -> Pre_M
+
+    -- Operations inside monads
+
+    return_M : #a:Type -> a -> K_M(a)
+    return_PURE a x p   = p x
+    return_ALL  a x p h = p x h
+
+    bind_M : #a:Type -> #b:Type -> K_M(a) -> (a -> K_M(b)) -> K_M(b)
+    bind_PURE a b wp f p   = wp (fun x    -> f x p)
+    bind_ALL  a b wp f p h = wp (fun x h' -> f x p h') h
+
+    monotonic_M: #a:Type -> K_M(a) -> Type
+    monotonic_PURE a wp = forall p1 p2. (forall x. p1 x ==> p2 x) ==> (wp p1 ===> wp p2)
+    monotonic_ALL a wp = forall p1 p2. (forall x h. p1 x h ==> p2 x h) ==> (forall h. wp p1 h ===> wp p2 h)
+
+    op_M : #a:Type -> K_M(a) -> K_M(a) -> K_M(a)   
+      where op : Type -> Type -> Type
+    op_PURE a wp1 wp2 p   = (wp1 p)   op (wp2 p)
+    op_ALL  a wp1 wp2 p h = (wp1 p h) op (wp2 p h)
+
+    up_M : #a:Type -> Type -> K_M(a)
+    up_PURE a t p   = t
+    up_ALL  a t p h = t
+
+    down_M : #a:Type -> K_M(a) -> Type
+    down_PURE a wp = forall p. wp p
+    down_ALL  a wp = forall p h. wp p h
+
+    closeE_M : #a:Type -> #b:Type -> (b -> K_M(a)) -> K_M(a)
+    closeE_PURE a b f p   = forall b:b. f b p
+    closeE_ALL  a b f p h = forall b:b. f b p h
+
+    closeT_M : #a:Type -> (Type -> K_M(a)) -> K_M(a)
+    closeT_PURE  a f p   = forall_Type b:Type. f b p
+    closeT_ALL   a f p h = forall_Type b:Type. f b p h
+
+    ite_M : #a:Type -> K_M(int) -> K_M(a) -> K_M(a) -> K_M(a)
+    ite_M a wp0 wp1 wp2 = bind_M wp0 (fun i -> (up_M (i  = 0) ==>_M wp1) /\_M
+                                               (up_M (i != 0) ==>_M wp2))
+
+    valid_M : Pre_M  -> Type                                               
+    valid_PURE p = p
+    valid_ALL  p = forall h. p h
+
+    -- Operations between monads, in the lattice
+
+    lift_M,M' : #a:Type -> K_M(a) -> K_M'(a)
+    lift_PURE,ALL a wp p h = wp (fun x -> p x h)
+
+    It is easy to check that all the operations on WPs preserve monotonicity. 
+
+   For example: 
+         monotonic_M a wp1
+    /\   forall (x:a). monotonic b (wp2 x)
+    ==>  monotonic_M b (bind_M a b wp1 wp2) 
+
+    And also that all the lifts (here only 1) satisfy the monad
+    morphism laws.
+
+--------------------------------------------------------------------------------
+
+Expression typing (G |- e : M t wp):
+
+    G, x:t, G' |- ok
+    ----------------------- [T-Var]
+    G, x:t, G' |- x : Tot t
+
+    
+    G |- ok
+    ---------------- [T-Const]
+    G |- c : Tot T_c
+
+
+    G |- t1 : Type
+    G, x:t1 |- e : M t2 wp
+    --------------------------------------------- [T-Abs]
+    G |- fun (x:t1) -> e :  Tot (x:t1 -> M t2 wp)
+
+
+    G |- t : Type
+    G |- d : Tot (x:tx -> Tot t')
+    t = y:tx -> PURE t'' wp
+    G, x:tx, f: (y:tx -> PURE t'' (up_PURE (d y << d x) /\_PURE wp))
+       |- e : (PURE t'' wp[x/y])
+    ---------------------------------------------------------------- [T-Fix]
+    G |- let rec (f^d:t) x = e : Tot t
+
+
+    G |- t : Type
+    t = y:tx -> ALL t' wp
+    G, x:tx, f:t |- e : (ALL t' wp[x/y])
+    ------------------------------------ [T-FixOmega]
+    G |- let rec (f:t) x = e : Tot t
+
+
+    G |- e0 : M int wp0
+    G |- e1 : M t wp1
+    G |- e2 : M t wp2
+   ------------------------------------------------------ [T-If]
+    G |- if0 e0 then e1 else e2 : M t (ite_M wp0 wp1 wp2)
+
+
+    G |- e1 : M (x:t -> M t' wp) wp1
+    G |- e2 : M t wp2
+    G |- t'[e2/x] : Type 
+    x in FV t' ==> G |- e2 : Tot t                      
+    ---------------------------------------------------------------- [T-App]
+    G |- e1 e2 :  M (t'[e2/x])
+                    (bind_M wp1 (fun f -> bind_M wp2 (fun x -> wp)))
+
+
+    G |- e : Tot t
+    ------------------------------- [T-Ret]
+    G |- e : PURE t (return_PURE e)
+
+
+    G |- e : M' t' wp'
+    G |- M' t' wp' <: M t wp <== phi
+    G |= phi
+    -------------------------------- [T-Sub]
+    G |- e : M t wp
+
+--------------------------------------------------------------------------------
+
+Sub-computations (G |- M' t' wp' <: w t wp):
+
+    M' <= M
+    G |- t' <: t <== phi
+    G |- wp : K_M(t)
+    G |= monotonic_M t wp
+    --------------------------------------------------------------------[S-Comp]
+    G |- M' t' wp' <: M t wp  <== phi /\ down_M (wp ==>_M (lift_M'_M wp'))
+
+--------------------------------------------------------------------------------
+
+Sub-typing (G |- t' <: t):
+
+    G |= t' =_Type t
+    G |- t : Type
+    --------------------- [Sub-Conv]
+    G |- t' <: t <== true
+
+
+    G |- t <: t' <== phi
+    G, x:t |- M' s' wp' <: M s wp <== psi
+    ------------------------------------------------------------------ [Sub-Fun]
+    G |- (x:t' -> M' s' wp') <: (x:t -> M s wp) <== phi /\ forall x:t. psi
+
+
+    G |- t1 <: t2 <== phi12
+    G |- t2 <: t3 <== phi23
+    -------------------------------- [Sub-Trans]
+    G |- t1 <: t3 <== phi12 /\ phi23
+
+--------------------------------------------------------------------------------
+
+Kinding (G |- t : k):
+
+    G |- ok
+    ------------- [K-Var]
+    G |- a : G(a)
+
+
+    G |- ok
+    ------------ [K-Const]
+    G |- T : K_T
+
+
+    G |- t1 : Type
+    G, x:t1 |- t2 : Type
+    G, x:t1 |- phi : K_M(t2)
+    G, x:t1 |= monotonic_M t2 phi
+    ---------------------------- [K-Arr]
+    G |- x:t1 -> M t2 phi : Type
+
+
+    G |- k ok
+    G, a:k |- t : k'
+    ------------------------------- [K-TLam]
+    G |- fun (a:k) -> t : a:k -> k'
+
+
+    G |- t1 : Type
+    G, x:t1 | -> t2 : k2
+    ---------------------------------- [K-ELam]
+    G |- fun (x:t1) -> t2 : x:t1 -> k2
+
+
+    G |- t1 : a:k -> k'
+    G |- t2 : k
+    G |- k'[t2/a] ok
+    --------------------- [K-TApp]
+    G |- t1 t2 : k'[t2/a]
+
+
+    G |- t : x:t' -> k
+    G |- e : Tot t'
+    G |- k[e/x] ok
+    ------------------ [K-EApp]
+    G |- t e : k[e/x]
+
+
+    G |- t : k'
+    G |- k' <: k <== phi
+    G |= phi
+    -------------------- [K-Sub]
+    G |- t : k
+
+--------------------------------------------------------------------------------
+
+Sub-kinding (G |- k1 <: k2 <== phi):
+
+    G |- k ok
+    -------------------- [KSub-Refl]
+    G |- k <: k <== true
+
+
+    G |- k2 <: k1 <== phi1
+    G, a:k2 |- k1' <: k2' <== phi2
+    ---------------------------------------------------------------- [KSub-KArr]
+    G |- a:k1 -> k1' <: a:k2 -> k2' <== phi1 /\ forall_k2 a:k2. phi2
+
+
+    G |- t2 <: t1 <== phi1
+    G, x:t2 |- k1 <: k2 <== phi2
+    ----------------------------------------------------------- [KSub-TArr]
+    G |- x:t1 -> k1 <: x:t2 -> k2 <== phi1 /\ forall x:t2. phi2
+
+--------------------------------------------------------------------------------
+
+Kind well-formedness (G |- k ok):
+
+    G |- ok
+    ------------ [KOk-Type]
+    G |- Type ok
+
+
+    G |- t : Type
+    G, x:t |- k' ok
+    ----------------- [KOk-TArr]
+    G |- x:t -> k' ok
+
+
+    G |- k ok
+    G, a:k |- k' ok
+    ----------------- [KOk-KArr]
+    G |- a:k -> k' ok
+
+--------------------------------------------------------------------------------
+
+Validity (G |= phi):
+
+We represent logical validity as yet another inductive judgment
+(mutually inductive with all the others).
+
+    G, x:t, G' |- ok
+    ---------------- [V-Assume]
+    G, x:t, G' |= t
+
+
+    G |- e  : t
+    G |- e' : t
+    e ~> e'
+    ----------- [V-RedE]
+    G |= e = e'
+
+
+    G |- e : Tot t
+    -------------- [V-EqReflE]
+    G |= e = e
+
+
+    G |= e1 = e2
+    G |= e2 = e3
+    -------------- [V-EqTranE]
+    G |= e1 = e3
+
+
+    G |= e1 = e2
+    -------------- [V-EqSymE]
+    G |= e2 = e1
+
+
+    G |= e1 = e2
+    G |= t{e1/x}
+    -------------- [V-SubstE]
+    G |= t{e2/x}  
+
+    G |- t : k
+    G |- t' : k
+    t ~> t'
+    ------------- [V-RedT]
+    G |= t =_k t'
+
+
+    G |- t : k
+    ------------ [V-EqReflT]
+    G |= t =_k t  
+
+
+    G |= t1 =_k t2
+    G |= t2 =_k t3
+    -------------- [V-EqTranT]
+    G |= t1 =_k t3
+
+
+    G |= t1 =_k t2
+    -------------- [V-EqSymT]
+    G |= t2 =_k t1
+
+
+    G |= t1 =_k t2
+    G |= t{t1/x}
+    -------------- [V-SubstT]
+    G |= t{t2/x}
+
+
+    G |- (asHeap H) : heap
+    G |- l : ref int
+    ---------------------------- : [V-SelAsHeap]
+    G |= sel (asHeap H) l = H(l)
+
+
+    G |- (asHeap H) : heap
+    G |- l : ref int
+    G |- e : Tot int
+    ------------------------------------------- [V-UpdAsHeap]
+    G |= upd (asHeap H) l i = (asHeap (H[l<-i])
+
+
+    G |- eh : heap
+    G |- el : ref int
+    G |- ei : int
+    ------------------------------- [V-SelEq]
+    G |= sel (upd eh el ei) el = ei
+
+
+    G |- eh : heap
+    G |- el : ref int
+    G |- el' : ref int
+    G |- ei : int
+    G |= ~(el = el')
+    --------------------------------------- [V-SelNeq]
+    G |= sel (upd eh el' ei) el = sel eh el
+
+
+    G, x:t |= phi
+    ---------------------- [V-ForallIntro]
+    G |= forall (x:t). phi
+
+
+    G, a:k |= phi
+    ------------------------ [V-ForallTypIntro]
+    G |= forall_k (a:k). phi
+
+
+    G |= forall (x:t). phi
+    G |- e : Tot t
+    ---------------------- [V-ForallElim]
+    G |= phi[e/x]
+
+
+    G |= forall_k (a:k). phi
+    G |- t : k
+    ------------------------ [V-ForallTypElim]
+    G |= phi[t/a]
+
+
+    G |= p1 /\ p2
+    ------------- [V-AndElim1]
+    G |= p1
+
+
+    G |= p1 /\ p2
+    ------------- [V-AndElim2]
+    G |= p2
+
+
+    G |- t1    G |- t2
+    ------------------ [V-AndIntro]
+    G |= t1 /\ t2
+
+
+    G, x:t1 |= t2
+    G |- t1 ==> t2 : Type
+    ---------------------- [V-ImplIntro]
+    G |= t1 ==> t2
+
+
+    G |- t1 ==> t2    G |= t1
+    ------------------------- [V-ImplElim]
+    G |= t2
+
+
+    G |- ok
+    ------------ [V-ExMiddle]
+    G |= t \/ ~t
+
+
+    G |= t1
+    G |- t2 : Type
+    -------------- [V-OrIntro1]
+    G |= t1 \/ t2
+
+
+    G |= t2
+    G |- t1 : Type
+    -------------- [V-OrIntro2]
+    G |= t1 \/ t2
+
+
+    G |= t1 \/ t2
+    G, x:t1 |= t3
+    G, x:t2 |= t3
+    G |- t3 : Type
+    -------------- [V-OrElim]
+    G |= t3
+
+
+    G |- ok
+    --------- [V-True]
+    G |= true
+
+
+    G |= false
+    G |- t : Type
+    ------------- [V-FalseElim]
+    G |= t
+
+
+    v1 << v2          
+    G |- v1 : t       
+    G |- v2 : t       
+    ------------------- [V-PreceedsIntro]   
+    G |= precedes v1 v2       
+                              
+
+
+    G |- c1 : t
+    G |- c2 : t
+    c1 <> c2
+    --------------- [V-DistinctC]
+    G |= ~(c1 = c2)
+
+
+    G |- tv1 : Type
+    G |- tv2 : Type
+    T_h <> T_h'
+    ------------------------------------------- [V-DistinctTH]
+    G |= ~(T_h \bar{tau} =_Type T_h'\bar{tau}')
+
+      where T_h ::= ->PURE | ->ALL | T     // type head
+            tau ::= e | t                  // expression or type
+
+
+    T_h \bar{tau} = T_h \bar{tau}'
+    ------------------------------ [V-InjTH]
+    tau_i = tau_i'
+
+
+We define "~t" as syntactic sugar for "t ==> false"
+
+--------------------------------------------------------------------------------
+
+Environment well-formedness (G |- ok)
+
+    . |- ok [G-Empty]
+
+
+    G |- t : Type    x not in dom G
+    ------------------------------- [G-Type]
+    G, x:t |- ok
+
+
+    G |- k ok    a not in dom G
+    --------------------------- [G-Kind]
+    G, a:k |- ok
+
+================================================================================
+
+Proofs:
+
+Notation: When we want to focus on the typing environment for all
+          judgments we use the notation G |- J. Formally, this stands
+          for any of the 8 judgments of our type system:
+              G |- e : M t wp,
+              G |- M' t' wp' <: M t wp <== phi,
+              G |- t' <: t <== phi,
+              G |- t : k,
+              G |- k <: k'
+              G |- k ok
+              G |= phi
+              G |- ok
+
+let app_M wp1 wp2 wp = bind_M wp1 (fun f -> bind_M wp2 wp)
+let tot_PURE t       = fun p -> forall (x:t). p x
+let tot_ALL t        = lift_PURE_ALL (tot_PURE t) = fun p h -> forall (x:t). p x h
+let tot t            = tot_PURE t
+let ret_PURE e       = return_PURE  e
+let ret_ALL e        = lift_PURE_ALL (ret_PURE e)
+
+--------------------------------------------------------------------------------
+
+Constant's kinds/types:
+
+  (1) forall type constants T.          . |- K_T ok
+
+  (2) forall expression constants c.    . |- T_c : Type
+
+Proof. Immediate by inspection.
+
+--------------------------------------------------------------------------------
+========================
+Lemma: Derived-judgments:
+========================
+
+  (1) G |- e : M t wp  ==>  G |- t : Type  /\  G |- wp : K_M(t)  /\  G |= monotonic_M t wp /\ G |- ok
+
+  (2) G |- M' t' wp' <: M t wp <== phi /\ G |- t' : Type /\ G |- wp' : K_M(t')
+  ==> G |- t : Type  /\  G |- wp : K_M(t)  /\  G |- phi : Type  /\  G |- ok
+
+  (3) G |- t' <: t <== phi  /\  G |- t' : Type
+  ==> G |- t : Type  /\  G |- phi : Type  /\  G |- ok
+
+  (4) G |- t : k  ==>  G |- k ok  /\  G |- ok
+
+  (5) G |- k <: k'  ==>  G |- k ok  /\  G |- k' ok  /\  G |- ok
+
+  (6) G |- k : ok  ==>  G |- ok
+
+  (7) G |= t  ==>  G |- t : Type  /\  G |- ok
+
+Proof. By mutual induction on judgments.
+
+For (1) we use the constant's types lemma for rule (T-Const). For rule
+(T-Sub) we use part (2) of the IH. Rules (T-Var), (T-Abs), (T-Fix),
+(T-FixOmega), and (T-App) have explicit preconditions for making this
+true. For monotonicity, we rely on the monotonicity of every WP in G
+via K-Arr, in S-Comp, and by showing that every WP-combinator
+preserves monotonicity.
+
+For (2) rule (S-Comp) has an explicit precondition to make the 2nd
+conjunct true.
+
+For (4) we use the constant's kinds lemma for (K-Const). Rules
+(K-Var), (K-TLam), (K-ELam), (K-TApp) and (K-EApp) have explicit
+side-conditions for making this true.
+
+--------------------------------------------------------------------------------
+================================
+Lemma: Totality-and-monotonicity
+================================
+            G |- e : PURE t wp      (H0)
+         /\ G |= wp post            (H1)
+        ==> G |- e : Tot t
+        
+Proof:
+   We use H0 with T-Sub. 
+
+   The main sub-goal is to show:
+         G |= forall q. (forall x. q x) ==> wp q
+
+   Introducing, with V-ForallTypIntro, and V-ForallIntro, we have: 
+
+                G |= (forall x. q x)  (I1)
+
+   and the goal is G |= wp q
+
+   From Lemma Derived-judgments (1), we have that wp is monotonic.
+   So, we use H1 and monotonicity, where the main sub-goal is to show:
+               G |- forall x. post x ==> q x, 
+   Which is easy trivial, using I1. 
+--------------------------------------------------------------------------------
+===============
+Lemma Weakening:
+===============
+    G, G' |- J  /\  G, b, G' |- ok  ==>  G, b, G' |- J
+
+where b stands for x:t or a:k
+
+--------------------------------------------------------------------------------
+=============================
+Lemma Reduction substitutive:
+=============================
+
+(1) e1 ~> e2 ==> e1[e/x] ~> e2[e/x]
+(2) t1 ~> t2 ==> t1[e/x] ~> t2[e/x]
+
+Proof: By mutual induction on the reduction relations
+       for pure expressions and types.
+
+(PS-Beta) (fun (y:t) -> e'') e' ~> e''[e'/y]
+  By PS-Beta: (fun (y:t[e/x]) -> e''[e/x]) e'[e/x] ~> (e''[e/x])((e'[e/x])/y)
+  We swapping the two substitutions, using the fact that y is
+  chosen fresh (in particular y not in fe'(e)):
+    (fun (y:t[e/x]) -> e''[e/x]) e'[e/x] ~> (e''[e'/y])[e/x]
+
+(PS-LetRec) similar to (PS-Beta)
+
+(PS-If0) and (PS-IfS) trivial
+
+All the context rules follow directly from IH.
+
+The cases for t1~>t2 are analogous.
+
+--------------------------------------------------------------------------------
+===========================
+Lemma: Inversion-for-values
+===========================
+        G |- e : M t wp0                                (H1)
+     /\ (e is a value  \/ e is a variable)
+   ==>  G |- v : PURE t (ret_PURE v)                    (C1)
+     /\ G |- down_M (wp0 ==> lift_PURE_M (ret_PURE e))  (C2)
+
+Proof: Induction on H1.
+
+The cases applicable are: T-Var, T-Const, T-Abs, T-Ret, T-Sub
+
+Cases (T-Var, T-Const, T-Abs): 
+      We have: 
+         G |- e : Tot t
+      
+
+      For C1, we use T-Ret. 
+
+      For C2, we need to show G |= forall post. (forall x. post x) ==> post e
+      which is a tautology.
+
+Case (T-Ret):
+      We have 
+         G |- e : Pure t (ret_PURE e)
+
+      Which suffices for C1 and C2 is a tautology.
+
+Case (T-Sub):
+      We have 
+         G |- e : M t wp
+
+      Inverting, we have 
+          G |- e : M' t' wp'                            (I1)
+          G |- M' t' wp' <: M t wp <== phi              (I2)
+          G |= phi                                      (I3)
+
+      where phi = down_M (wp ==>_M (lift_M'_M wp')) /\ phi' (I21)
+      and   G |- t' <: t <== phi'                           (I22)
+
+      From the IH we have: 
+      
+           (IH1) G |- e : Pure t (ret_PURE e)
+           (IH2) G |- down_M' (wp' ==> lift_PURE_M' (ret_PURE e))
+         
+      For (C1), we use IH1 with I22 and T-Sub.
+
+      For (C2), we use IH2 with I21 and the
+      commutation-of-lift-with-down-==> Lemma.
+--------------------------------------------------------------------------------
+=========================
+Lemma: Variable inversion
+=========================
+
+        G |- x : M t wp
+    ==> G |= down_M (wp ==>_M return_M x)
+
+Proof: A special case of inversion for values. 
+--------------------------------------------------------------------------------
+===================
+Lemma: Substitution
+===================
+
+forall G, tx, e'.
+       G |- e' : Tot tx
+   ==>
+
+   (1) forall x, G', e, t, wp.
+        G, x:tx, G' |- e : M t wp
+   ==>  G, G'[e'/x] |- e[e'/x] : (M t wp)[e'/x]
+
+/\ (2) forall x, G', k.
+        G, x:tx, G' |- k ok
+   ==>  G, G'[e'/x] |- k[e'/x] ok
+
+/\ (3) forall x, G', t, wp, t', wp', phi.
+        G, x:tx, G' |- M t wp <: M' t' wp' <== phi
+   ==>  G, G'[e'/x] |- M t[e'/x] wp[e'/x] <: M' t'[e'/x] wp'[e'/x] <== phi[e'/x]
+
+/\ (4) forall x, G', t, k.
+        G, x:tx, G' |- t : k
+   ==>  G, G'[e'/x] |- t[e'/x] : k[e'/x]
+
+/\ (5) forall x, G', t, k1, k2.
+        G, x:tx, G' |- k1 <: k2
+   ==>  G, G'[e'/x] |- k1[e'/x] <: k[e'/x]
+
+/\ (6) forall x, G', t, t', phi.
+        G, x:tx, G' |- t <: t' <== phi
+   ==>  G, G'[e'/x] |- t[e'/x] <: t'[e'/x] <== phi[e'/x]
+
+/\ (7) forall x, G', phi.
+        G, x:tx, G' |= phi
+   ==>  G, G'[e'/x] |= phi[e'/x]
+
+/\ (8) forall x, G',
+        G, x:tx, G' |= ok
+   ==>  G, G'[e'/x] |= ok
+
+Proof: By mutual induction on the 8 judgments (G, x:tx, G'|- J).
+
+Cases of (1)
+
+(T-Var): y=x
+  Have:
+    tx = t
+      so also G |- e' : Tot t  (H)
+    G |- t : Type
+      since x not dom(G) also x not in fv(t), so t[e'/x]=t
+
+  By variable inversion lemma on the original judgment:
+    G, x:tx, G' |= down_M (wp ==>_M return_M x)   (H')
+
+  Show:
+    G, G'[e'/x] |- e' : M t wp[e'/x]
+
+  By repeatedly applying weakening to H we obtain:
+    G, G'[e'/x] |- e' : Tot t
+
+  By (T-Return) we obtain:
+    G, G'[e'/x] |- e' : PURE t (return_PURE e')
+
+  By (T-Sub) we still have to show:
+    G, G'[e'/x] |- PURE t (return_PURE e') <: M t wp[e'/x] <== phi
+    G, G'[e'/x] |= phi
+
+  By (S-Comp) still to show:
+    G, G'[e'/x] |- t <: t' <== true -- immediate from Sub-Conv
+    G, G'[e'/x] |= down_M (wp[e'/x] ==>_M (lift_PURE_M (return_PURE e')))
+
+  By a lift+return rule, still to show:
+    G, G'[e'/x] |= down_M (wp[e'/x] ==>_M (return_M e'))
+
+  By applying the IH (part 7) in H' we obtain what we need.
+
+(T-Var): y<>x
+
+  Sub-case: y in dom(G)
+    Have: G = G1, y:t, G2
+      G1, y:t, G2, x:tx, G' |- y : Tot t
+      G1, y:t, G2, x:tx, G' |- ok (H1)
+      G1 |- t : Type              (H2)
+    By derived judgment
+      y not in dom(G2) U {x} U dom(G')
+      x not in fv(t)
+        so also x not in fv(t)
+        which means that t[e'/x] = t
+
+    By IH (part 8) to H1 we get:
+      G1, y:t, G2, G'[e'/x] |- ok
+
+    From this and (H2), by T-Var we conclude that
+      G1, y:t, G2, G'[e'/x] |- y : Tot t
+
+  Sub-case: y in dom (G')
+    Have: G' = G1', y:t, G2'
+      G1, x:tx, G1', y:t, G2' |- y : Tot t
+      G1, x:tx, G1', y:t, G2' |- ok (H1)
+      G1, x:tx, G1' |- t : Type     (H2)
+
+    By applying IH (part 8) to H1 we obtain:
+      G1, G1'[e'/x], y:t[e'/x], G2'[e'/x] |- ok (H1')
+
+    By applying IH (part 4) to H2 we obtain:
+      G1, G1'[e'/x] |- t[e'/x] : Type           (H2')
+
+    From (H1') and (H2') by T-Var we conclude that:
+      G1, G1'[e'/x], y:t[e'/x], G2'[e'/x] |- y : Tot t[e'/x]
+
+(T-Const): trivial, constants are not affected by substitution and have
+           fixed closed types.
+
+(T-Abs):
+   Have:
+       e = fun (x:t1) -> e1    t = (x:t1 -> M t2 wp)    M = Tot
+       (H1) G, x:tx, G' |- t1 : Type     (H2) G, x:tx, G', y:t1 |- e1 : M t2 wp
+   By applying the induction hypothesis to (H1) and (H2) we obtain:
+       (H1') G, G'[e'/x] |- t1[e'/x] : Type
+       (H2') G, G'[e'/x], y:t1[e'/x] |- e1[e'/x] : M t2[e'/x] wp[e'/x]
+   By (T-Abs)
+       G, G'[e'/x] |- fun (y:t1) -> e1[e'/x]
+         : Tot (y:t1[e'/x] -> M t2[e'/x] wp[e'/x])
+
+(T-Fix):
+ Have:
+  e = let rec (f^d:t) z = e    t = y:tx -> PURE t'' wp    M = Tot
+  (H1) G, x:tx, G' |- t : Type   (H2) G, x:tx, G' |- d : Tot (z:tx -> Tot t')
+  (H3) G, x:tx, G', z:tx, f: (y:tx -> PURE t'' (up_PURE (d y << d z) /\_PURE wp))
+          |- e : (PURE t'' wp[z/y])
+ By IH:
+  (H1') G, G'[e'/x] |- t[e'/x] : Type
+  (H2') G, G'[e'/x] |- d[e'/x] : Tot (z:tx[e'/x] -> Tot t'[e'/x])
+  (H3') G, G'[e'/x], z:tx[e'/x],
+        f: (y:tx[e'/x] -> PURE t''[e'/x]
+              (up_PURE (d[e'/x] y << d[e'/x] z) /\_PURE wp[e'/x]))
+          |- e[e'/x] : (PURE t''[e'/x] wp[z/y][e'/x])
+ Since we assumed x, y, and z distinct
+   and z \not\in fv(e') from G |- e' : Tot tx and z \not in dom(G)
+   we have  wp[z/y][e'/x] = wp[e'/x][z/y]
+ By (T-Fix) we conclude that
+  G, G'[e'/x] |- let rec (f^d[e'/x]:t[e'/x]) z = e[e'/x] : Tot t[e'/x]
+
+(T-FixOmega) similar to the case above, just simpler
+
+(T-Ret) trivial
+
+(T-If) trivial
+
+(T-App)
+ Have:
+  e = e1 e2   t = (t'[e_2/y])
+  wp = (bind_M wp1 (fun f -> bind_M wp2 (fun y -> wp')))
+  (H1) G, x:tx, G' |- e1 : M (y:t'' -> M t' wp) wp1
+  (H2) G, x:tx, G' |- e2 : M t'' wp2
+  (H3) G, x:tx, G' |- t'[e2/y] : Type
+ By IH:
+  (H1') G, G'[e'/x] |- e1 : M (y:t''[e'/x] -> M t'[e'/x] wp'[e'/x]) wp1[e'/x]
+  (H2') G, G'[e'/x] |- e2 : M t''[e'/x] wp2[e'/x]
+  (H3') G, G'[e'/x] |- t'[e2/y][e'/x] : Type
+ Since y not in dom G and G |- e' : Tot tx we have y  not in fv e'
+       x not in dom G, G' and G, x:tx, G' |- e2 : M t'' wp2 we have x not fv e2
+ So we can freely swap the two substitutions: t'[e2/y][e'/x] = t'[e'/x][e2/y]
+ By (T-App)
+  G, G'[e'/x] |- e1[e'/x] e2[e'/x] :  M (t'[e'/x][e_2/x])
+    (bind_M wp1[e'/x] (fun f -> bind_M wp2[e'/x] (fun x -> wp'[e'/x])))
+
+(T-Sub)
+ Have: (H1) G, x:tx, G' |- e : M' t' wp'
+       (H2) G, x:tx, G' |- M' t' wp' <: M t wp <== phi
+       (H3) G, x:tx, G' |= phi
+ By IH: (H1') G, G'[e'/x] |- e[e'/x] : M' t'[e'/x] wp'[e'/x]
+ By IH (part 3):
+  (H2') G, G'[e'/x] |- M' t'[e'/x] wp'[e'/x] <: M t[e'/x] wp[e'/x] <== phi[e'/x]
+ By substitution lemma for validity:  
+  (H3') G, G'[e'/x] |= phi[e\/x]
+ By (T-Sub)
+  G, G'[e'/x] |- e[e'/x] : M t[e'/x] wp[e'/x]
+
+The cases for parts (2) and (3) are all immediate.
+
+The cases for part (4) kinding are immediate, we only list one explicitly:
+
+(K-EApp)
+ Have t = t1 e1   k = k1[e1/x1]
+  (H1) G, x:tx, G' |- t1 : (x1:t1 -> k1)
+  (H2) G, x:tx, G' |- e1 : Tot t1
+ By IH:
+  (H1') G, G'[e'/x] |- t1[e'/x] : (x1:t1[e'/x] -> k1[e'/x])
+  (H2') G, G'[e'/x] |- e1[e'/x] : Tot t1[e'/x]
+ By (K-EApp)
+  G, G'[e'/x] |- t1[e'/x] e1[e'/x] : Tot k1[e'/x][e1/x1]
+ Since x not in free(e') and x1 not in free(e')
+  k1[e'/x][e1/x1] = k1[e1/x1][e'/x]
+ and with this we can conclude
+
+The cases for kind well-formedness and subkinding (parts 5 and 6) are trivial.
+
+Proof of part 7 validity:
+
+The most interesting cases are (V-RedE) and (V-RedT).
+
+(V-RedE):
+ Have: e=(e1=e2) where e1 ~> e2
+ By reduction substitutive lemma above (part 1) e1[e/x] ~> e2[e/x]
+ Which allows us to show that G,G'[e/x] |= e1[e/x] = e2[e/x]
+
+(V-RedT): By part (2) of reduction substitutive lemma.
+
+--------------------------------------------------------------------------------
+==================================================
+Lemma: Reduction substitutive (type substitution):
+==================================================
+(1) e1 ~> e2 ==> e1[t/a] ~> e2[t/a]
+(2) t1 ~> t2 ==> t1[t/a] ~> t2[t/a]
+
+--------------------------------------------------------------------------------
+========================
+Type substitution lemma:
+========================
+
+  forall G, s, ks.
+         G |- s : ks
+     ==>
+
+       (1) forall a, G', e, t, wp.
+            G, s:ks, G' |- e : M t wp
+       ==>  G, G'[s/a] |- e[s/a] : (M t wp)[s/a]
+
+    /\ (2) forall a, G', k.
+            G, s:ks, G' |- k ok
+       ==>  G, G'[s/a] |- k[s/a] ok
+
+    /\ (3) forall a, G', t, wp, t', wp', phi.
+            G, s:ks, G' |- M t wp <: M' t' wp' <== phi
+       ==>  G, G'[s/a] |- M t[s/a] wp[s/a] <: M' t'[s/a] wp'[s/a] <== phi[s/a]
+
+    /\ (4) forall a, G', t, k.
+            G, s:ks, G' |- t : k
+       ==>  G, G'[s/a] |- t[s/a] : k[s/a]
+
+    /\ (5) forall a, G', t, k1, k2.
+            G, s:ks, G' |- k1 <: k2
+       ==>  G, G'[s/a] |- k1[s/a] <: k[s/a]
+
+    /\ (6) forall a, G', t, t', phi.
+            G, s:ks, G' |- t <: t' <== phi
+       ==>  G, G'[s/a] |- t[s/a] <: t'[s/a] <== phi[s/a]
+
+    /\ (7) forall a, G', phi.
+            G, s:ks, G' |= phi
+       ==>  G, G'[s/a] |= phi[s/a]
+
+    /\ (8) forall a, G', phi.
+            G, s:ks, G' |- ok
+       ==>  G, G'[s/a] |- ok
+
+Proof. Analogous to term substitution.
+
+--------------------------------------------------------------------------------
+======================
+Lemma Bound reduction:
+======================
+         forall G t1 t2 G' J.
+                G, x:t1, G' |- J
+            /\  t1 ~> t2 
+            /\  G |- t2 : Type
+            ==> G, x:t2, G' |- J
+
+Proof: By mutual induction on derivations. The only rules that use
+       expression variable bindings are (T-Var), (V-Assume), and
+       (G-Type):
+
+(T-Var):
+  Subcase x = y:
+    Have:
+      G, x:t1, G' |- ok
+      G |- t1 : Type
+
+    By IH (J = ok part) we have that 
+      G, x:t2, G' |- ok
+    Also we have this explicit premise:
+      G |- t2 : Type
+
+    From the previous two we obtain that:
+      G, x:t2, G' |- x : Tot t2
+
+    By (T-Sub), (S-Comp), (Sub-Conv), (V-RedT) and (V-EqSym) we conclude that:
+      G, x:t2, G' |- x : Tot t1
+
+  Subcase x <> y: trivial
+
+(V-Assume)
+  Have:
+    G, x:t1, G' |- ok
+    G |- t1 : Type
+
+  By IH (J = ok part) we have that 
+    G, x:t2, G' |- ok
+  Also we have this explicit premise:
+    G |- t2 : Type
+
+  Form the previous two we obtain that:
+    G, x:t2, G' |= t2
+
+  By (V-RedT) and (V-EqSym) we conclude that:
+    G, x:t2, G' |= t1
+  
+(G-Type)
+  Have: G' = . (empty environment)
+    G |- t1 : Type    x not in dom G
+  We as an explicit premise that :
+    G |- t2 : Type
+  This allows us to conclude that:
+    G, x:t2 |- ok
+
+The other cases are just applications of the induction hypotheses.
+
+--------------------------------------------------------------------------------
+====================================================
+Lemma Reflexivity of sub-typing and sub-computation:
+====================================================
+      (1) G |- t : Type ==> G |- t <: t <== true
+      (2) G |- t : Type /\ G |- wp : K_M(t)
+      ==> G |- M t wp <: M t wp <== phi /\ . |= phi
+
+Proof.
+
+Part (1) is trivial from (Sub-Conv) and (V-EqReflT).
+
+Part (2):
+  By part (1):
+    G |- t <: t <== true
+  By (S-Comp):
+    G |- M t wp <: M t wp  <== true /\ down_M (wp ==>_M wp)
+  From (V-AndIntro), (V-TrueIntro), (V-ForallIntro), (V-ImplIntro) and (V-Assume):
+    . |= true /\ down_M (wp ==>_M wp)
+
+--------------------------------------------------------------------------------
+======================================
+Lemma: Transitivity-of-sub-computation
+======================================
+
+         G |- M t wp <: M' t' wp' <== phi            (H1)
+     /\  G |- M' t' wp' <: M'' t'' wp'' <== phi'     (H2)
+    ==>  G |- M t wp <: M'' t'' wp'' <== phi''
+     /\  G |= (phi /\ phi') ==> phi''
+
+Proof: by inverting the sub-computation judgment (H1), there is a
+       single rule:
+
+(S-Comp)
+  Have:
+    phi = (phi1 /\ down_M (wp' ==>_M (lift_M_M' wp)))
+    M <= M'                   (G11)
+    G |- t <: t' <== phi1     (G12)
+    G |- wp' : K_M(t')        (G13)
+
+  Since (H12) can only be obtained by (S-Comp):
+    phi' = (phi1' /\ down_M (wp'' ==>_M' (lift_M'_M'' wp')))
+    M' <= M''                 (G21)
+    G |- t' <: t'' <== phi1'  (G22)
+    G |- wp'' : K_M(t'')      (G3)
+
+  From (G11) and (G12) by transitivity of <= we get:
+    M <= M''                  (G1)
+
+  From (G12) and (G22) by (Sub-Trans):
+    G |- t <: t' <== phi1''   (G2)
+    G |= phi1'' ==> phi1 /\ phi1'
+
+  From (G1), (G2), and (G3) by (S-Comp):
+    G |- M t wp <: M'' t'' wp''
+         <==  phi1''  /\  down_M (wp'' ==>_M'' (lift_M_M'' wp))
+
+  Still to show:
+    G |= (phi1 /\ down_M (wp' ==>_M (lift_M_M' wp)) /\
+          phi1' /\ down_M (wp'' ==>_M' (lift_M'_M'' wp'))) ==>
+          phi1'' /\ down_M (wp'' ==>_M'' (lift_M_M'' wp))
+  
+  This is immediate from (V-ImplElim), (V-ImplIntro) (V-AndElim), and
+  (V-AndIntro).
+
+--------------------------------------------------------------------------------
+==========================
+Lemma: Bound-strengthening:
+==========================
+
+    G, x:t, G' |- J
+ /\ G |- t' <: t
+==> G, x:t', G' |- J
+
+Proof: by mutual induction on the 8 judgments.
+
+--------------------------------------------------------------------------------
+===================================-
+Lemma: Subtyping-inversion-for-arrow
+====================================
+
+    forall G t1 s1 wp1 t2 s2 wp2.
+        G |- (x:t1 -> M1 s1 wp1) <: (x:t2 -> M2 s2 wp2) <== phi
+    /\  G |/= false
+    ==> exists phi' psi.
+    /\    G |- t2 <: t1 <== phi'
+    /\    G, x:t2 |- M1 s1 wp1 <: M2 s2 wp2 <== psi
+    /\    G |= phi ==> (phi' /\ forall x:t2. psi)
+
+Proof: By induction on the subtyping judgment:
+
+(Sub-Fun)
+
+  Have:
+    phi = (phi' /\ forall x:t2. psi)
+    G |- t1 <: t2 <== phi'
+    G, x:t2 |- M1 s1 wp1 <: M2 s2 wp2 <== psi
+
+  By (V-ImplIntro) and (V-AndElim2) we conclude that:
+    |= phi ==> (phi' /\ forall x:t2. psi)
+
+  By inverting (S-Conv):
+    M1 <= M2
+
+(Sub-Conv)
+  Have:
+    phi' = true 
+    psi = true
+    G |= (x:t1 -> M1 s1 wp1) = (x:t2 -> M2 s2 wp2)
+
+  Subcase M1 = M2:
+
+    Because <= is reflexive:
+      M1 <= M2
+
+    By (V-InjTH):
+      G |= t1 = t2
+      G |= s1 = s2
+      G |= wp1 = wp2
+
+    From (V-ImplIntro), (V-Assume), and (V-SubstT).
+      G |= down_M1 (wp2 ==>_M1 (lift_M1_M1 wp1))
+
+    By (Sub-Conv)
+      G |= t2 <: t1 <== true
+      G |= s1 <: s2 <== true
+
+    By weakening:
+      G, x:t2 |= s1 <: s2 <== true
+
+    We conclude by (S-Comp):
+      G, x:t2 |- M1 s1 wp1 <: M2 s2 wp2 <== down_M2 (wp2 ==>_M2 (lift_M1_M2 wp1))
+
+    Finally, by (V-TrueIntro), (V-ImplIntro), (V-ForallIntro), and (V-AndIntro):
+      G |= true ==> (true /\ forall x:t1. down_M2 (wp2 ==>_M2 (lift_M1_M2 wp1)))
+
+  Subcase M1 <> M2:
+
+    By (V-DistinctTH):
+      G |= ~((x:t1 -> M1 s1 wp1) = (x:t2 -> M2 s2 wp2))
+
+    By (V-ImplElim):
+      G |= false   -- contradiction
+
+(Sub-Trans)
+  Have:
+    G |- (x:t1 -> M1 s1 wp1) <: (x:t2 -> M2 s2 wp2) <== phi12 (G1)
+    G |- (x:t2 -> M2 s2 wp2) <: (x:t3 -> M3 s3 wp3) <== phi23 (G2)
+
+  By IH in (G1):
+    G |- t2 <: t1 <== phi12'                       (G11)
+    G, x:t2 |- M1 s1 wp1 <: M2 s2 wp2 <== psi12    (G12)
+    G |= phi12 ==> (phi12' /\ forall x:t2. psi12)  (G13)
+
+  By IH in (G2):
+    G |- t3 <: t2 <== phi23'                       (G21)
+    G, x:t3 |- M2 s2 wp2 <: M3 s3 wp3 <== phi23    (G22)
+    G |= phi23 ==> (phi23' /\ forall x:t3. psi23)  (G23)
+
+  From (G21) and (G11) by (Sub-Trans):
+    G |- t3 <: t1 <== (phi12' /\ phi23')
+
+  From (G12) by bound strengthening:
+    G, x:t3 |- M1 s1 wp1 <: M2 s2 wp2 <== psi12    (G12')
+
+  From (G12') and (G22) by the transitivity of the sub-computation judgment:
+    G, x:t3 |- M1 s1 wp1 <: M2 s3 wp3 <== psi
+    G, x:t3 |= (psi12 /\ psi23) ==> psi            (G33)
+
+  Still to show:
+    G |= (phi12 /\ phi23) ==> (phi12' /\ phi23' /\ forall x:t1. psi)
+
+  This follows from (G13), (G23), (G33) and formula validity.    
+
+--------------------------------------------------------------------------------
+============================================
+Lemmma: Commutation-of-lift-down-==>
+============================================
+
+       G |= down_M (p  ==>_M (lift_M'_M q)
+  /\   G |= down_M' (q ==>_M' r)
+  ==>  G |= down_M (p  ==>M  (lift_M'_M r))
+
+ Proof: 
+        Case: M=M': easy.
+        Case M'=PURE, M=ALL:
+
+        Expanding definitions, 
+                G |= forall post h. p post h  ==> q (fun x -> post h)
+          /\    G |= forall post. q post ==> r post
+          ==>   G |= forall post h. p post  ==> r (fun x -> post h)
+
+        This is a simple application of modus ponens and quantifier instantiation.
+
+--------------------------------------------------------------------------------
+====================================
+Lemma Subtyping:arrow-leads-to-arrow (up to conversion!):
+====================================
+
+      G |- x:t1 -> M t2 wp : Type
+      G |= s =_Type (x:t1 -> M t2 wp)
+      G |- s <: t <== phi
+      G |= phi
+  ==> exists t1', t2', M', wp'.
+            G |= t =_Type (x:t1' -> M' t2' wp')
+        /\  G |- t1' <: t1 <== phi1
+        /\  G, x:t1' |- M t2 wp <: M' t2' wp' <== phi2
+        /\  G |= phi1 /\ forall x:t1'. phi2
+
+Proof: Easy induction on the sub-typing judgment.
+--------------------------------------------------------------------------------
+================================
+Lemma: Inversion-for-abstraction:
+================================
+  let f = fun x:s1 -> e                     
+
+      G |- f : M s wp                                      (H1)
+==>  exists t1 M' t2 wp' phi.
+         G |= s =_Type (x:t1 -> M' t2 wp')                 (C1)
+     /\  G |- s1 : Type                                    (C2)
+     /\  G |- t1 <: s1 <== phi                             (C3)
+     /\  G |= phi                                          (C4)
+     /\  G |= down_M (wp ==>_M lift_PURE_M (ret_PURE f))   (C5)
+     /\  G,x:t1 |- e : M' t2 wp'                           (C6)
+     /\  exists M0, t0, wp0, phi0, 
+                     G, x:s1 |- e : M0 t0 wp0                    (C7)
+                  /\ G, x:t1 |- M0 t0 wp0 <: M' t2 wp <== phi0   (C8)
+                  /\ G, x:t1 |= phi0                             (C9)
+
+
+Proof: By induction on the typing derivation (H1):
+
+Case (T-Abs)
+  Have:
+    M = PURE,
+    wp = tot s
+    s = (x:s1 -> M'' s2 wp''')        (I1)
+    G |- s1 : Type                    (I2)
+    G, x:s1 |- e : M'' s2 wp'''       (I3)
+
+  C1: Reflexivity;
+  C2: from I1
+  C3: Reflexivity;
+  C4: phi = True
+  C5: Need to show G |= down_PURE (tot s ==>_PURE (ret_PURE f)), 
+      which is a tautology.
+  C6: From I3.
+  C7--C9: we take (M0, t0, wp0, phi0) = (M'', s1, wp'', true)
+
+Case (T-Ret):
+  Have:
+    M = PURE
+    wp = ret_PURE f
+    G |- f : PURE s (tot s)                (I1)
+
+  By IH, we get: 
+
+  exists t1 M' t2 wp' phi phi'.
+         G |- s =_Type (x:t1 -> M' t2 wp')      (IH1)
+     /\  G |- s1 : Type                         (IH2)
+     /\  G |- t1 <: s1 <== phi'                 (IH3)
+     /\  G |= phi /\ phi'                       (IH4)
+     /\  G |= down_PURE (tot_PURE s ==>_PURE (tot_PURE s))         (IH5)
+     /\  G,x:t1 |- e : M' t2 wp'                (IH6)
+     /\  G,x:s1 |- e : M0 t0 wp0                        (IH7)
+     /\  G,x:t1 |- M0 t0 wp0 <: M' t2 wp' <== phi0      (IH8)
+     /\  G,x:t1 |= phi0                                 (IH9)
+
+
+  IH1--IH4 and IH6--IH9 are exact for C1--C4 and C6--C9.
+
+  We need to show C5:
+
+    G |= down_PURE (ret_PURE f ==>_PURE (ret_PURE f))
+
+  Again, a tautology. 
+
+
+Case (T-Sub):
+
+  Have:
+    G |- f : M'' t'' wp''   (I1)
+    G |- M'' t'' wp'' <: M s wp <== phi'  (I2)
+    G |= phi'                             (I3)
+
+
+  From IH, we get: 
+
+         G |- t'' =_Type (x:t1 -> M' t2 wp')            (IH1)
+     /\  G |- s1 : Type                                 (IH2)
+     /\  G |- t1 <: s1 <== phi'                         (IH3)
+     /\  G |= phi /\ phi'                               (IH4)
+     /\  G |= down_M'' (wp'' ==>_M'' lift (ret_PURE f)) (IH5)
+     /\  G,x:t1 |- e : M' t2 wp'                        (IH6)
+     /\  G,x:s1 |- e : M0 t0 wp0                        (IH7)
+     /\  G,x:t1 |- M0 t0 wp0 <: M' t2 wp' <== phi0      (IH8)
+     /\  G,x:t1 |= phi0                                 (IH9)
+
+
+  By inverting (I2)/(S-Comp):
+    phi' = (phi1' /\ down_M (wp ==>_M (lift_M''_M wp'')))
+    M'' <= M                               (I21)
+    G |- t'' <: s <== phi1'                (I22)
+
+  From (I22) and Lemma (arrow-leads-to-arrow), we get
+
+      G |= s =_Type (x:t1' -> M'' t2' wp''')  (L0)
+      G |- t1' <: t1 <== phi1                 (L1)
+      G |= phi1 /\ forall x:t1'. phi2         (L3)
+
+  For Goal C1, we have L0.
+  For Goal C2, we have IH2.
+  For Goal C3, we have L1 and IH3, and we conclude with Sub-Trans.
+  For Goal C4, we use L3 and IH4. 
+  For Goal C5, we need to show 
+      G |= down_M (wp ==>_M lift (ret_PURE f)) (goal)
+
+      From I2 and I3, we have:
+          G |= down_M (wp ==>_M (lift_M''_M wp''))  (J1)
+
+      Using G1 and Lemma commutation-of-lift-with-down_M-==>, we get our goal.
+
+  For Goal C6, we need to show:
+      G, x:t1' |- e : M'' t2' wp'''
+
+      We have I22, and using lemma subtyping-inversion-for-arrow, we get
+      G, x:t1' |- M' t2 wp <: M'' t2' wp'' <== phi'' (I22.1)
+      G |- t1' <: t1                                 (I22.2)
+      G, x:t1' |- phi''                              (I22.3)
+      
+      
+      We use IH6, Lemma bound strengthening with I22.2, I22.1 and
+      T-Sub to conclude.
+
+  For Goal C7, we use IH7.
+
+  For Goal C8, we need to show:
+      G,x:t1' |- M0 t0 wp0 <: M'' t2' wp'' <== phi0'      
+
+      We use a variant of Lemma Bound-strengtening for subtyping with
+      IH8, I22.1 and transitivity of sub-computation to get C8.
+
+  For Goal C9, we use I22.3 and IH9, with V-AndIntro.
+
+--------------------------------------------------------------------------------
+================================
+Lemma: Inversion-for-application
+================================
+
+    G |- e1 e2 : M t wp0
+==> exists t1, t2, wp, wp1, wp2.
+(C1)  /\  G |- e1 : M (x:t1 -> M t2 wp) wp1    
+(C2)  /\  G |- e2 : M t1 wp2                  
+(C3)  /\  G |- t2[e2/x] <: t <== phi           
+(C4)  /\  G |= phi                             
+(C5)  /\  G |- t2[e2/x] : Type                 
+(C6)  /\  (G |= down_M (wp0 ==>_M app_M wp1 wp2 (fun x -> wp))        (C6.L) //reason about e1 e2 by its type
+        \/  (G |= down_M (tot_M t ==>_M app_M wp1 wp2 (fun x -> wp))  (C6.R) //reason by its definition, if e1 e2 is total
+          /\ G |- e1 e2 : Tot t
+          /\ G |= down_M (wp0 ==>_M ret_M (e1 e2))))
+
+Proof: by induction on the typing derivation; there are 3 rules that
+       can apply to an application: (T-App), (T-Ret) or (T-Sub)
+
+Case (T-App)
+  Have:
+    G |- e1 : M (x:t -> M t' wp) wp1   (C1)
+    G |- e2 : M t wp2                  (C2)
+    G |- t'[e2/x] : Type               (C5)
+    wp0 = app_M wp1 wp2 (fun x -> wp)
+
+  By reflexivity of subtyping we show:
+    G |- t'[e2/x] <: t'[e2/x] <== true (C3)
+
+  By (V-AndIntro)
+    G |= true                          (C4)                  
+
+  For C6, we prove (C6.L):
+     By (V-ForallIntro), (V-ImplIntro), (V-Assume):
+     G |= down_M (wp0 ==> wp0)
+
+Case (T-Ret)
+  Have:
+       M = PURE
+       wp0 = (return_PURE (e1 e2))
+ (H1)  G |- e1 e2 : Tot t  where Tot t = PURE t (tot t)
+
+  By IH:
+    G |- e1 : M (x:t1 -> M t2 wp) wp1            (IH1)
+    G |- e2 : M t1 wp2                           (IH2)
+    G |- t2[e2/x] <: t <== phi                   (IH3)
+    G |= phi                                     (IH4)
+    G |- t2[e2/x] : Type                         (IH5)                         
+
+   (IH6)
+      (G |= down_PURE (tot t ==>_PURE app_PURE wp1 wp2 (fun x -> wp))     (IH6.L)
+        \/  (G |= down_PURE (tot t ==>_PURE app_PURE wp1 wp2 (fun x -> wp))  (IH6.R)
+          /\ G |- e1 e2 : Tot t                                           
+          /\ G |= down_M (tot t ==>_PURE ret_PURE (e1 e2))))
+
+    Simplifying (IH6):
+       G |= down_PURE (tot t ==>_PURE app_PURE wp1 wp2 (fun x -> wp))  (IH6.S)
+    
+  Still to show:
+      (G |= down_PURE (ret_PURE (e1 e2) ==>_PURE app_PURE wp1 wp2 (fun x -> wp))     (C6.L)
+        \/  (G |= down_PURE (tot t ==>_PURE app_PURE wp1 wp2 (fun x -> wp))          (C6.R)
+          /\ G |- e1 e2 : Tot t                                                      
+          /\ G |= down_M (ret_PURE (e1 e2) ==>_PURE ret_PURE (e1 e2))))
+
+  We prove (C6.R):
+     The first conjunct is (IH6.S)
+     The second conjunct (H1)
+     The third conjunct is a tautology.
+
+Case (T-Sub):
+  Have:
+    G |- e1 e2 : M' t' wp0'            (H1)
+    G |- M' t' wp0' <: M t wp0 <== phi (H2)
+    G |= phi                           (H3)
+
+  By applying IH in (H1) we get that
+    G |- e1 : M' (x:t1 -> M' t2 wp') wp1'    (IH1)
+    G |- e2 : M' t1 wp2'                     (IH2)
+    G |- t2[e2/x] <: t' <== phi'             (IH3)
+    G |= phi'                                (IH4)
+    G |- t2[e2/x]                            (IH5)
+
+    (IH6)
+        (G |= down_M (wp0' ==>_M app_M wp1' wp2' (fun x -> wp'))          (IH6.L)
+        \/  (G |= down_M (tot_M t' ==>_M app_M wp1' wp2' (fun x -> wp'))  (IH6.R) (IH6.R.1)
+          /\ G |- e1 e2 : Tot t'                                               (IH6.R.2)
+          /\ G |= down_M (wp0' ==>_M ret_M (e1 e2))))                          (IH6.R.3)
+
+  For the goal, we instantiate:
+      wp1=lift_M'_M wp1',
+      wp2=lift_M'_M wp2'
+       wp=lift_M'_M wp'
+
+  By inversion in (H2) using (S-Comp) we get:
+    phi = (phi'' /\ down_M (wp0 ==>_M (lift_M'_M wp0')))
+    G |- t' <: t <== phi''
+    M' <= M
+
+  To prove G1 and G2:
+    if M=M, then lift_M'_M = id, and we simply use IH1 and IH2
+    Otherwise, we have M < M': so, we apply T-Sub with IH1 and IH2, 
+    and the generated logical guards are tautologies.
+
+
+  From (IH3) by the transitivity of subtyping we obtain that:
+    G |- t'[e2/x] <: t <== phi'''            (G3)
+    G |= (phi' /\ phi'') ==> phi'''
+
+  From (H3) by (V-AndElim)
+    G |= phi''
+    G |= down_M (wp0 ==>_M (lift_M'_M wp0')) (WP0)
+
+  From the first of these and (IH4) by (V-AndIntro):
+    G |= phi' /\ phi''
+
+  From these by (V-ImplElim):
+    G |= phi'''                              (G4)
+
+  Before we can put together (IH1), (IH2), (G3), (G4), and (IH5) and
+  conclude we still need to show (C6):
+
+        (G |= down_M (wp0 ==>_M app_M wp1 wp2 (fun x -> wp))          (C6.L)
+        \/  (G |= down_M (tot_M t ==>_M app_M wp1 wp2 (fun x -> wp))  (C6.R) (C6.R.1)
+          /\ G |- e1 e2 : Tot t                                              (C6.R.2)
+          /\ G |= down_M (wp0 ==>_M ret_M (e1 e2))))                         (C6.R.3)
+
+  We do this by an additional case analysis, writing lift for lift_M'_M:
+
+    Splitting (IH6):
+
+    Sub-case (IH6.L): We aim for (C6.L)
+           G |= down_M' (wp0' ==>_M' app_M' wp1' wp2' (fun x -> wp'))          (IH6.L)
+
+       Our goal is:
+           G |= down_M (wp0 ==>_M app_M (lift wp1') (lift wp2') (fun x -> (lift wp'))) (C6.L)
+           
+
+       From WP0, we have  G |= down_M (wp0 ==>_M (lift wp0'))
+
+       Since the lifts are monad morphisms, and app_M is a sequence of binds, 
+
+          G |=  app_M (lift wp1') (lift wp2) (fun x -> (lift wp'))
+                      =
+                lift (app_M' wp1' wp2' (fun x -> wp'))
+
+       Our goal is now:
+          G |= down_M (wp0 ==>_M lift (app_M' wp1' wp2' (fun x -> wp')))
+
+       We use Lemma (commutation of lifts, down, and op_M), with WP0 and IH6.L to conclude.
+
+
+    Sub-case (IH6.R): We aim for (C6.R)
+
+         Note that we have t' <: t, from an inversion of H2.
+
+         To prove (C6.R.1):
+            Our goal is:
+                G |= down_M (tot_M t ==>_M app_M (lift wp1') (lift wp2') (fun x -> (lift wp')))  (C6.R.1)
+
+            Rewriting, using the monad morphism law, 
+                G |= down_M (tot_M t ==>_M lift (app_M' wp1' wp2' (fun x -> wp')))  (Goal)
+
+            We have from IH6.R.1:
+                G |= down_M' (tot_M' t' ==>_M' app_M' wp1' wp2' (fun x -> wp')) (IH6.R.1)
+                
+            Given t' <: t, we have
+                 G |= down_M (tot_M t ==>_M tot_M t')
+            rewriting
+                 G |= down_M (tot_M t ==>_M (lift (tot_M' t')))   (TotImp)
+            
+            We use Lemma (commutation of lifts, down, and ==>_M), with TotImp and IH6.R.1 to conclude.
+
+
+        To prove (C6.R.2): To prove (C6.R.2), we use (IH6.R.2) and with inversion of H2.
+
+
+        To prove (C6.R.3):
+           Our goal is: 
+               G |= down_M (wp0 ==> ret_M (e1 e2)) (Goal)
+
+           We have:
+                G |= down_M' (wp0' ==>_M' ret_M' (e1 e2)) (IH6.R.3)
+           and  G |= down_M (wp0 ==>_M lift wp0') (WP0)
+
+           We conclude using the commutations of lifts, down, and ==>_M lemma.
+
+--------------------------------------------------------------------------------
+=======================
+Lemma: Inversion-for-if
+=======================
+        let e = if e0 then e1 else e2 
+
+          G |- e : M t wp      (H1)
+     ==>  exists wp0. 
+(C1)           G |- e0 : M int wp0     
+(C2)       /\  G |- e1 : M t wp1
+(C3)       /\  G |- e2 : M t wp2
+(C4)       /\  (G |= downM (wp ==>M ite_M wp0 wp1 wp2)          (C4.L)        
+            \/ (G |- e : Tot t                                  (C4.R.1)
+                /\ G |= downM (tot_M t ==>M ite_M wp0 wp1 wp2)  (C4.R.2)
+                /\ G |= downM (wp ==>M ret_M e)))               (C4.R.3)
+
+Proof: By induction on H1. 
+
+The applicable cases are (T-If), (T-Ret), and (T-Sub). 
+The proof is analogous to Lemma Inversion-for-application. 
+--------------------------------------------------------------------------------
+==============================
+Lemma: Inversion-for-constants
+==============================
+        G |- c : M t wp
+    ==> G |- t_c <: t
+
+Proof: Easy induction on the typing judgment.
+--------------------------------------------------------------------------------
+==================================================
+Lemma: Preservation-of-typing-on-pure-reduction
+    and  Preservation-of-kinding-on-type-reduction
+==================================================
+
+    (1) forall G, e, t, wp, post.
+               G |- e  : PURE t wp      (H0)      
+          /\   e ~> e'                  (H1)
+          /\   G |= wp post             (H2)
+          ==>  G |- e' : PURE t wp      (C1)   
+                 
+    (2) forall G t t' k,                (H3)
+               G |- t : k               (H4)
+           /\  t ~> t'                  (H5)
+           ==> G |- t' : k              (C3)
+
+Proof: By mutual induction on pure and type reduction relations
+
+Part 1: 
+
+Case (PS-LamT):
+    e  = fun (x:s1) -> e1
+    e' = fun (x:s1') -> e1
+
+    G |- e : PURE t wp                   (H0)
+    G |- e ~> e'                         (H1)
+
+  Inverting, PS-LamT, we also have:
+    s1 ~> s2                             (I1)
+
+  For goal (C1), we aim to show:
+     G |- e' : PURE t wp
+
+
+     Applying Lemma inversion-for-abstraction to H0, we get:
+     
+         G |= t =_Type x:t1 -> M' t2 wp'            (G31)
+         G, x:t1 |- e1 : M' t2 wp''                 (G32)
+         G |- t1 <: s1 <== phi                      (G33)  
+         G |= phi                                   (G34)  
+         G |= down_PURE (wp ==>_PURE ret_PURE e1)   (G35) 
+
+         ...
+         G, x:s1 |- e1 : M0 t0 wp0                  (G37)
+         G, x:t1 |- M0 t0 wp0  <: M' t2' wp'        (G38)
+
+
+     To get (C1), we use T-Abs, we have two sub-goals:
+
+        Subgoal 1: G |- s1' : Type
+                   We get this from the mutual induction hypothesis.
+
+        Subgoal 2: 
+     
+            G, x:s1' |- e1 : M0 t0 wp0
+
+            We use (G37) and Lemma Bound-strengthening, noting that G |- s1 =Type s1'.
+
+            So, we have G |- e' : Tot (x:s1 -> M0 t0 wp0)    (J1)
+
+            Using (J1), with (G38), (G33) and T-Sub, we get:
+
+                    G |- e1' : Tot t                         (J2)
+                    
+            Using (T-Ret), we get 
+                    G |- e1' : Pure t (ret_PURE e1')         (J3)
+
+            To conclude, we need to show 
+
+                    G |= down_PURE (wp ==>_PURE ret_PURE e1')
+
+                    But, we have G |= e1 = e1' , since they are related by reduction. 
+
+                    So, we use G35 and V-SubstE to conclude. 
+        
+      
+Case (PS-RecT): Similar to PS-LamT.
+
+Case (PS-AppE1):
+
+    e  = e1  e2
+    e' = e1' e2
+
+   We have:
+    G |- e1 e2 : PURE t wp0                  (H0)
+    G |- e1 ~> e1'                           (H1)
+
+   Applying Lemma inversion-for-application: 
+
+   (I1)      G |- e1 : PURE (x:t1 -> PURE t2 wp) wp1    
+   (I2)  /\  G |- e2 : PURE t1 wp2                  
+   (I3)  /\  G |- t2[e2/x] <: t <== phi           
+   (I4)  /\  G |= phi                             
+   (I5)  /\  G |- t2[e2/x] : Type                 
+   (I6)  /\  (G |= down_PURE (wp0 ==>_PURE app_PURE wp1 wp2 (fun x -> wp))        (I6.L) 
+           \/  (G |= down_PURE (tot t ==>_M app_M wp1 wp2 (fun x -> wp))          (I6.R) 
+                     /\ G |- e1 e2 : Tot t
+                     /\ G |= down_PURE (wp0 ==>_M ret_M (e1 e2))))
+
+   From the induction hypothesis, we get:
+        (IH1)  G |- e1' : PURE (x:t1 -> PURE t2 wp) wp1
+
+                                  
+   Next, we build:
+       (C1')    G |- e1' e2 : PURE t wp0'
+                
+                Using IH1 and I2, with T-App and get
+
+                wp0' = app_PURE wp1 wp2 (fun x -> wp)
+
+   We need to show  G |- e1' e2 : PURE t wp0
+   meaning we need  G |= down_PURE (wp0 ==>PURE wp0') (GOAL)
+
+   So, split on the cases of (I6):
+
+     sub-case (I6.L): We have what we need, immediately. 
+
+     sub-case (I6.R):
+
+          We use I6.R.1, C1' and T-Sub to build:
+              G |- e1' e2 : Tot t                     (J1)
+
+          Then, we use J1 and T-Ret to build:
+              G |- e1' e2 : PURE t (ret (e1' e2))     (J3)
+              
+          Then, using I6.R.3 and V-SubstE, we build (GOAL).
+
+Case (PS-AppE2, PS-LetRecD, PS-If0E0): 
+     all context rules, which are similar to PS-AppE1.
+
+Case (PS-Beta):
+     
+     e  = f v
+     f  = fun (x:s1) -> e1
+     e' = e1[v/x]
+
+     G |- e : PURE t wp0                  (H0)
+     G |- e ~> e'                        (H1)
+
+   Applying Lemma inversion-for-application: 
+
+   (I1)      G |- f : PURE (x:t1 -> PURE t2 wp) wp1    
+   (I2)  /\  G |- v : PURE t1 wp2                  
+   (I3)  /\  G |- t2[v/x] <: t <== phi           
+   (I4)  /\  G |= phi                             
+   (I5)  /\  G |- t2[v/x] : Type                 
+   (I6)  /\  (G |= down_PURE (wp0 ==>_PURE app_PURE wp1 wp2 (fun x -> wp))        (I6.L) 
+           \/  (G |= down_PURE (tot t ==>_PURE app_PURE wp1 wp2 (fun x -> wp))    (I6.R) 
+                     /\ G |- f v : Tot t
+                     /\ G |= down_M (wp0 ==>_PURE ret_PURE (f v))))
+
+
+   Applying Lemma inversion-for-abstraction to (I1), we get: 
+
+         G |- s1 : Type                                    (J1)
+     /\  G |- t1 <: s1 <== phi                             (J2)
+     /\  G |= phi                                          (J3)
+     /\  G |= down_PURE (wp1 ==>_M ret_PURE f)             (J4)
+     /\  G,x:t1 |- e1 : PURE t2 wp                         (J5)
+     /\  G, x:s1 |- e1 : M0 t0 wp0                         (J6)
+     /\  G, x:t1 |- M0 t0 wp0 <: PURE t2 wp <== phi0       (J7)
+     /\  G, x:t1 |= phi0                                   (J8)
+
+   ----  First, we build;
+                 G |- v : PURE t1 (ret v)          (S1)
+            and  G |= down (wp2 ==> (ret v))   (V-Ret)
+
+         by using the Lemma inversion-for-values with (I2). 
+
+   ----- Next, we build :  
+                G |- v : Tot t1               (V-Tot)
+
+         We use T-Sub with S1 to build (V-Tot), so long as we can show
+                G |= downPURE (tot t ==> ret v)
+         which is a tautology. 
+
+   ----- Next, we build :  G |- e1[v/x] : (PURE t2 wp)[v/x]    (Reduct-typed)
+
+         We use (V-Tot) and (J5) with the substitution lemma.
+
+   ----- To conclude, we need to show that G |- e1[v/x] : PURE t wp0
+
+         We first use T-Sub with (Reduct-typed), using t2[v/x] <: t from I3. to build
+
+            G |- e1[v/x] : PURE t (wp[v/x])  (R)
+
+         We split the cases of (I6):
+
+         Sub-case (I6.L):
+                  
+                We use (R) with T-Sub and have to show    
+                We show G |= down (wp0 ==> wp[v/x])
+
+                From Lemma inversion-of-values, from V-Ret, an from I6.L, we have
+                   G |=  down (wp0 ==> app (ret f) (ret v) (fun x -> wp))
+                unfolding .. 
+                   G |= wp0 ==> wp[v/x] which is our goal. 
+               
+         Sub-case (I6.R)            
+
+               From Lemma inversion-of-values, from V-Ret, an from I6.R.1, we have
+                   G |=  down (tot t ==> app (ret f) (ret v) (fun x -> wp))
+               unfolding ...
+                   G |=  down (tot t ==> wp[v/x])                      (KK1)
+                
+               We also have from I6.R.3:                
+                   G |= down (wp0 ==>_PURE ret_PURE (f v))             (KK2)
+
+               So, we use (R), (KK1) and T-Sub to build:
+                         G |- e1[v/x] : Tot t
+
+               Using T-Ret, we build
+                         G |- e1[v/x] : PURE t (ret_PURE (e1[v/x]))
+               
+               Using T-Sub, we rely on f v ~> e1[v/x] 
+               to derive G |= e1[v/x] = f v, and build
+
+                         G |- e1[v/x] : PURE t (ret_PURE (f v))
+
+               We use KK2 with T-Sub to build
+                         G |- e1[v/x] : PURE t wp0 ... which is our goal.
+
+
+Case (PS-LetRec):
+
+     We have vf = let rec (f^d:t) x = e
+     and    (vf v ~> e[v/x][vf/f])
+
+     This case is analogous to two applications of PS-Beta. 
+
+     The main novelty is in the use of the substitution lemma to show that
+     if e0 then e1 else e2
+        given t = y:tx -> PURE t'' wp
+        and   G |- vf : Tot t
+
+        we can also derive
+              G |- vf : y:tx -> PURE t'' (up_PURE (d y << d v /\_PURE wp))
+
+        This amounts to showing:
+
+              G |= down_PURE (up_PURE (d y << d v /\_PURE wp) ==>PURE wp)
+                             
+        Unfolding definitions, it is easy to see that this is a tautology.
+
+
+Case (PS-If0):
+
+    e=if0 0 then e1 else e2 
+    e ~> e1 
+
+    We have   G |- e : Pure t wp
+
+    From Lemma inversion-for-if, we have:
+
+(C1)           G |- 0 : PURE int wp0     
+(C2)       /\  G |- e1 : PURE t wp1
+(C3)       /\  G |- e2 : PURE t wp2
+(C4)       /\  (G |= downPURE (wp ==>M ite_PURE wp0 wp1 wp2)          (C4.L)        
+            \/ (G |- e : Tot t                                  (C4.R.1)
+                /\ G |= downPURE (tot t ==>PURE ite_PURE wp0 wp1 wp2)  (C4.R.2)
+                /\ G |= downPURE (wp ==>PURE ret e)))               (C4.R.3)
+
+   Splitting on cases of (C4):
+
+   Leaving M implicit everywhere, since it is always PURE.
+
+   Sub-case (C4.L): 
+            G |= down (wp ==> ite wp0 wp1 wp2)          (C4.L)        
+
+            We use (C2) and get G |- e1 : PURE t wp1
+            We need to show     G |= down (wp ==> wp1)   (GOAL)
+
+            unfolding C4.L, we have
+                        G |= down (wp ==> bind wp0 (fun x -> up (x=0) ==> wp1
+                                                           /\   up (x<>0) ==> wp2))
+
+            From value inversion on C1, we have 
+                       G |= down (wp0 ==> ret_ 0)
+                       
+            Using it with (C4.l), we get:
+                     G |= down (wp ==> (up (0=0) ==> wp1
+                                     /\ up (0<>0) ==> wp2))
+                                       
+            Which simplifies easily to (GOAL).
+
+   Sub-case (C4.R): 
+            Our main-sub-goal is to show:
+
+               G |- e1 : Tot t       (E1-Tot)
+
+            Given (E1-Tot), we use (T-Ret) to build:
+
+                  G |- e1 : Pure t (ret e1)    (E1-Ret)
+
+            Then, we use (T-Sub) to build
+                  G |- e1 : Pure t (ret e)     (E1-Ret')
+            since e ~> e1, we have that the two are definitionally equal.
+
+            And finally, we use T-Sub with C4.R.3 to build
+            
+                  G |- e1 : Pure t wp, as required. 
+
+
+            Now, to show (E1-Tot):     
+
+               We have (C4.R.1)
+               
+                  G |= downPURE (tot t)
+                       ==> (ite_PURE wp0 wp1 wp2)
+
+               From value inversion, we know that downPURE (wp0 ==>PURE ret 0)
+
+                  G |= down (tot t
+                       ==> ((up_PURE (0=0) ==>PURE wp1
+                             /\ up_PURE (0<>0) ==>PURE wp2)))
+
+               Simplifying, we get
+
+                  G |= down (tot t ==>PURE wp1)   (Tot-Imp)
+
+               For the goal, we use C2 with T-Sub and Tot-Imp to build (E1-Tot), as needed. 
+
+Case (PS-IfS): Symmetric to PS-If0. 
+
+Part 2:
+
+(K-Var) and (K-Const): contradiction, type variables and constants do not reduce
+
+(K-Arr)
+  Case analysis on the last type reduction rule, the only rule that
+  applies is (TS-TCtx)
+    Subcase E = x:o -> M t2 phi : by bound reduction and induction hypothesis
+    Subcase E = x:t1 -> M o phi : by induction hypothesis
+    Subcase E = x:t1 -> M t2 o : by induction hypothesis
+
+(K-TLam) and (K-ELam) by bound reduction and induction hypothesis
+
+(K-TApp)
+  Have: t = t1 t2    k = k'[t/a]
+        G |- t1 : a:k'' -> k'
+        G |- t2 : k''
+  Show: G |- t' : k'[t/a]
+  Case analysis on the last type reduction rule:
+    (TS-TBeta) (fun (a:k) -> t') t ~> t'[t/a]   
+               By an easy inversion, we have that:
+                  1. G, a:k |- t' : k'
+                  2. G |- t : k
+               We use the type-substitution lemma to conclude.
+    (TS-TCtx): by induction hypothesis
+
+(K-EApp)
+  Have: t = t1 e    k = k'[e/x]
+        G |- t1 : x:t2 -> k'
+        G |- e : Tot t'
+  Show: G |- t' : k'[e/x]
+  Case analysis on the last type reduction rule:
+    (TS-EBeta) (fun (x:t) -> t') e ~> t'[e/x]   
+               By an easy inversion, we have that: 
+                  1. G, x:t |- t' : k'
+                  2. G |- e : Tot t
+               We use the substitution lemma for types to conclude.
+
+    (TS-TCtx): by induction hypothesis
+
+    (TS-ECtx): e ~> e'
+      We use the mutual induction hypothesis to get
+         G |- e' : Tot t'. 
+
+--------------------------------------------------------------------------------
+=========================================================
+Lemma: Pure-CBV-reductions-are-included-in-pure-reduction
+=========================================================
+
+    (H,e) ~> (H',e')                       (H1)
+  /\ G |- e : PURE t wp                    (H2)
+  /\ G |/= false                           (H4)
+ ==> e ~> e' /\ H = H'
+
+Proof. By induction on the derivation of (H1):
+
+Case (IS-Read)
+  Have: e = !l
+  By application inversion in H2:
+     G |- ! : PURE (x:t'' -> PURE t' wp') wp1
+
+  By Lemma inversion-for-constants, we get 
+
+    G |-  x:ref int -> ALL int (fun p h -> p (sel h x) h)
+          <: 
+          x:t'' -> PURE t' wp'
+
+  Using Lemma Subtyping-inversion-for-arrow, we get 
+  
+                   |- t'' <: ref int              (I1)
+   /\     G, x:t'' |- ALL int wp0 <: PURE t' wp'  (I2)
+   
+  Inverting I2, we get get All <= PURE ... a contradiction. 
+
+Case (IS-Write):
+     Similar to IS-Read.
+
+All other IS-* rules, have corresponding PS-* rules.
+
+For (IS-Beta), (IS-LetRec), (IS-If0), and (IS-IfS) it is immediate
+that H = H'.
+
+For the remaining rules (IS-AppE1), (IS-AppE2), (IS-If0E0) we need to
+first apply an inversion lemma on the typing judgment and then
+induction hypothesis before we can conclude.
+
+--------------------------------------------------------------------------------
+================
+Lemma Sub-effect
+================
+          G |- e : ALL t wp             (H1)
+    /\    G |- e : Pure t' wp'          (H2)
+    ==>   exists wp0. 
+               G |- e : Pure t' wp0                             (C1)
+          /\   G |- t' <: t                                     (C2)
+          /\   G |= downALL (wp ==>ALL (lift_PURE_ALL wp0))     (C3)
+
+Proof: Induction on (H1)
+
+The only cases are (T-If), (T-App) and (T-Sub). 
+
+Case (T-Sub): Easy with the induction hypothesis 
+              and an inversion on subtyping.
+
+Case (T-App): 
+       G |- e1 e2 : ALL t wp         (H1)
+       G |- e1 e2 : Pure t' wp0      (H2)
+
+   Inverting, (H1) we get:
+
+       G |- e1 : ALL (x:t1 -> ALL t2 wp) wp1   (H11)
+       G |- e2 : ALL t1 wp2                    (H12)
+       x in FV(t2) ==> G |- e2 : Tot t1
+       wp = app_ALL wp1 wp2 (fun x -> wp)
+       t = t2[e2/x]
+       
+   Using lemma inversion-for-application on H2, we get:
+   
+       G |- e1 : Pure (x:t1' -> Pure t2' wp') wp1'
+       G |- e2 : Pure t1' wp2'
+
+(I1)   G |- e1 : Pure (x:t1' -> Pure t2' wp') wp1'
+(I2)   G |- e2 : Pure t1' wp2'                  
+(I3)   G |- t2'[e2/x] <: t'
+
+    Applying the IH to H11 and I1, and H12 and I2, we get:
+
+(IH11)  G |- e1 : Pure (x:t1' -> Pure t2' wp') wp1''     
+(IH12)  G |- x:t1' -> Pure t2' wp'  <: x:t1 -> All t2 wp
+(IH13)  G |- down_All(wp1 ==>All lift wp1'')
+
+(IH21)  G |- e2 : Pure t1' wp2''
+(IH22)  G |- t1' <: t1
+(IH23)  G |- down_All(wp2 ==>All lift wp2'')
+
+    Using IH11 and IH21 with T-App, we get:
+
+        G |- e1 e2 : Pure (t2'[e2/x]) (appPure wp1'' wp2'' (fun x -> wp'))   (A)
+
+    We need to show
+
+    (C1): we use (A) with (T-Sub), using (I3) to turn (t2'[e2/x] into t')
+
+    For the remaining to goals, we go classical on  G |= false
+       Sub-case (G |= false): 
+          Goal (C2) is trivial, since G |- t2'[e2/x] =Type t2[e2/x]
+          Goal (C3) is also trivial, since it is of the form G |= phi 
+
+       Sub-case (G |/=false) :
+          We use Lemma subtyping-inversion-for-arrow with (IH12)
+          And get:
+                 G |- t1 <: t1'                        (J1)
+                 G, x:t1 |- Pure t2' wp' <: All t2 wp  (J2)
+                   
+          Inverting (J2), we get 
+                   G, x:t1 |- t2' <: t2                      (J3)
+                   G, x:t1 |- down_ALL (wp ==>ALL lift wp')  (J4)
+
+
+          For goal (C2): 
+
+               We use (IH21), (IH22), and (I3) with T-Sub, 
+               with substitutivity for sub-typing on (J3), we get 
+                            G, x:t1 |- t2'[e2/x] <: t2[e2/x]     (C2)
+
+          For goal (C3), 
+
+              We need to show G |= downALL (wp ==>ALL (lift (appPURE wp1'' wp2'' (fun x -> wp'))))
+
+              Using the morphism property of the lifs, and unfolding defs, we rewrite the goal to 
+
+              G |= downALL (app_ALL wp1 wp2 (fun x -> wp) 
+                             ==>ALL appAll (lift wp1'') (lift wp2'') (fun x -> (lift wp')))
+
+              We use two applications of monotonicity of wps with J4 and IH23, to show
+
+              G |= downALL (app_ALL wp1 wp2 (fun x -> wp) 
+                             ==>ALL wp1 (lift wp2'') (fun x -> (lift wp')))
+              And finally, use IH13 to show
+
+              G |= downALL (app_ALL wp1 wp2 (fun x -> wp) 
+                             ==>ALL wp1 (lift wp2'') (fun x -> (lift wp'))
+                             ==>ALL (lift wp1'') (lift wp2'') (fun x -> (lift wp')))
+                             
+              Which is our goal. 
+
+Case (T-If): Very similar to T-App, using the Lemma inversion-for-if,
+             the induction hypothesis and monotonicity of WPs.
+--------------------------------------------------------------------------------       
+
+Technical detail: in the following statement and proof of
+preservation, asHeap is a meta-level function for coercing heaps from
+the meta-level (where heaps are total maps from locations to integers)
+to the object level (where they are objects of the type constant
+called "heap").
+
+Note: considering open reductions for terms is not strictly necessary
+for programs, since we only care about reducing closed programs. But
+proving S.R. for open terms is not substantially more complicated---so
+we keep it for generality.
+--------------------------------------------------------------------------------
+===============================================
+Lemma: Preservation-of-typing-for-CBV-reduction
+===============================================
+             forall G, H, e, H', e', t, wp.
+                    G |- e : M t wp                             (H1)
+                    (H, e) ~> (H', e')                          (H2)
+               ==> forall post.
+               /\   G |- post : Post_ALL(t)                     (H3)
+               /\   G |= lift_M_ALL wp post (asHeap H)          (H4)
+               ==>  exists wp'.
+                       G |- e' : M t wp'                        (C1)
+                    /\ G |= lift_M_ALL wp' post (asHeap H')     (C2)
+---------------------------------------------------------------------------------
+
+Proof: 
+
+The proof is by by induction on (H2).
+
+To make the proof more compact, we try to re-use as much of the
+lemma on pure reductions as possible. 
+
+So, in each case, we focus mainly on the situation where G |/= false,
+and e cannot be given the Pure effect.
+
+To handle the other cases, we go classical: 
+
+Case: G |= false
+
+   This case is an easy---goal (C2) is clearly trivial.
+
+   For goal (C1), we do an easy induction on the top-level rule in
+   (H2). The main non-trivial goals are to show that every
+   type-annotation in e' is well-kinded (since the kind of a type does
+   not depend on the (now trivialized) validity judgment). However,
+   since (H2) never does any type-reduction, and since every
+   type-annotation in e is well-kinded, every annotation in e' is also
+   well-kinded.
+   
+
+Case: G |/= false
+
+  Case (M=PURE):
+    We use Lemma Pure-CBV-reductions-are-included-in-pure-reduction
+    to conclude that H'=H /\ (e ~> e'). 
+
+    Next, we use Lemma Preservation-of-typing-on-pure-reduction to get 
+          G |- e' : PURE t wp  (C1)
+    and  for (C2) we use (H4), since we have H'=H.
+
+  Case (M=ALL): 
+  
+    Here, we go Classical on  (exists t' wp'. G |- e : Pure t' wp)
+
+    Case:  G |- e : Pure _ _  
+  
+       if (M=ALL), we use Lemma Sub-effect to show that 
+          G |- e : Pure t' wp'    (H11) 
+          G |= down_ALL (wp ==>ALL (lift_PURE_ALL wp'))  (H12)
+          G |- t' <: t                                   (H13)
+
+       We use Lemma Pure-CBV-reductions-are-included-in-pure-reduction
+       and Lemma Preservation-of-typing-on-pure-reduction to get 
+           
+            H'=H                    (H14)
+            G |- e' : PURE t' wp'   (H15)
+
+       To get (C1), we use (T-Sub) and (H13) to get 
+            G |- e' : All t (lift_PURE_ALL wp')
+
+       To ge (C2), we use (H14) with (H12) and (H4).
+
+   Case: G |/- e : Pure _ _,  meaning that the least effect of e is ALL
+         This simplifies the use of all our inversion lemmas. 
+         And our notation, since we can now work in ALL, omitting explicit M subscripts.
+         
+         Now, we proceed by induction on (H2).
+
+         The main interesting cases are:
+
+==============
+Case (IS-Beta)
+==============
+        let f = (fun (x:t) -> e)
+ Hypothesis (H1):     G |- f v  : ALL t wp
+            (H2):     (H, f v) ~> (H, e[v/x])
+            (H4) :    G |= wp post (asHeap H)
+
+
+ We use Lemma inversion-for-application on (H1) to get:
+
+(C1)  /\  G |- f : ALL (x:t1 -> ALL t2 wp') wp1
+(C2)  /\  G |- v : ALL t1 wp2                  
+(C3)  /\  G |- t2[v/x] <: t <== phi           
+(C4)  /\  G |= phi                             
+(C5)  /\  G |- t2[v/x] : Type                 
+(C6.L)  /\  G |= down_M (wp ==>_M app_M wp1 wp2 (fun x -> wp'))      
+
+Note, (C6.R) is excluded, since we know that G |/- f v : Pure _ _ 
+
+Using Lemma inversion-for-values on f and v, on C6.L, we get
+
+(I1)  G |= down_M (wp ==>_M app_M (lift (ret f)) (lift (ret v)) (fun x -> wp'))
+(I2)  G |- v : Tot t1
+
+By reduction, we get 
+
+(I3)  G |= down_M (wp ==>_M wp' [v/x])
+
+Using Lemma inversion-for-abstractions on (C1), we get
+
+(I4)      G, x:t1 |- e : ALL t2 wp'
+
+Using the substitution lemma, we get
+
+(C1')     G |- e[v/x] : ALL (t2[v/x]) (wp'[v/x])
+
+Using (C1'), (C3) and (C4) with (T-Sub), we get  goal (C1). 
+
+For (C2), we need to show  G |- wp[v/x] post (asHeap H)
+But, this follows from (I3) and (H4),  (V-ForallTypElim), (V-ForallElim) and V-ImplElim.
+
+===============
+Case (IS-Read):
+===============
+
+ Hypothesis (H1):     G |- !l : ALL t wp
+            (H2):    (H, l) ~> (H, H(l))
+            (H4) :    G |= wp post (asHeap H)
+
+ From Lemma inversion-for-application on (H1) and then
+ inversion-for-constants, we have
+
+   (I1) t = int
+   (I2) G |= forall p h. wp p h ==> p (sel h l) h
+
+ And we have 2 subgoals:
+
+   find a wp' such that:
+
+   1. G |- H(l) : ALL int wp'
+
+   2. G |= wp' post (asHeap H)
+
+ To show sub-goal 1:
+    G |- H(l) : Tot int                                             (by T-Const)
+
+    G |- H(l) : PURE int (return_PURE int H(l))                       (by T-Ret)
+
+    G |- H(l) : ALL int (return_ALL int H(l))                         (by T-Sub)
+
+ To show sub-goal 2:
+
+   Need:   G |= (return_ALL int H(l)) post (asHeap H)
+   By definition of return_ALL, to show:
+           G |= post H(l) (asHeap H)
+
+   From (I2), (H4), (V-ForallTypElim), (V-ForallElim) and V-ImplElim,
+   we get:
+           G |= post (sel (asHeap H) l) (asHeap H)    (V)
+
+   From V-SelAsHeap and V-SubstE applied to (V) we get our goal.
+
+================
+Case (IS-Write):   
+================
+
+
+ Hypothesis (H1):     G |- l := i : ALL t wp
+            (H2):     (H, l := i) ~> (H', ())    where H'=H[l<-i]          
+            (H4) :    G |= wp post (asHeap H)
+
+
+ From Lemma inversion-for-application on (H1) and then
+ inversion-for-constants, we have
+
+   (I1) t = unit
+   (I2) G |= forall p h. wp p h ==> p () (upd h l i)
+
+ And we have 2 subgoals:
+
+   find a wp' such that:
+
+   1. G |- () : ALL unit wp'
+
+   2. G |= wp' post (asHeap H')
+
+
+ To show sub-goal 1:
+    G |- () : Tot unit                                              (by T-Const)
+
+    G |- () : PURE unit (return unit ())                              (by T-Ret)
+
+    G |- () : ALL unit (return_ALL unit ())                           (by T-Sub)
+
+ To show sub-goal 2:
+
+   Need:   G |= post () (asHeap H')
+
+   From (I2), (H4), (V-ForallTypElim), (V-ForallElim) and V-ImplElim,
+   we get 
+           G |= post () (upd (asHeap H) l i)   (V)
+
+   Using (V-UpdAsHeap) and (V-SubstE) we get
+           G |= post () (asHeap (H[l <- i]))
+
+   Which is exactly our goal:
+           G |= post () (asHeap H')
+
+===============
+Case (IS-AppE2):  
+===============
+
+    We have 
+
+       (H1)   G |- (v e1) : ALL t wp   
+       (H2)   (H, (v e1)) ~> (H', (v e1'))   
+       (H21)  (H, e1) ~> (H', e1')
+       (H4)   G |= wp post (asHeap H)
+
+
+   Using inversion-for-application:  (excluding C6.R, as in IS-Beta)
+
+           G |- v : ALL t wp0                            (I0)
+           G |- e1 : ALL t1 wp1                          (I1)
+           G |- down (wp ==> app wp0 wp1 (fun x -> wp))  (I2)
+
+   From Lemma value-inversion on (I0) applices to (I2), we get:
+
+          G |- down (wp ==> app (lift (ret v)) wp1 (fun x -> wp)))  (I3)
+   Simplifting
+
+          G |- down (wp ==> bind wp1 (fun x -> wp))  (H3)
+
+   From the IH, we have G |- e1' : M t1 wp1'
+
+   Next, we rebuild:
+
+      G |- (v e1') : ALL t wp'
+
+      where wp' = app (lift (ret v)) wp1' (fun x -> wp)
+      which simplifies again to 
+            wp' = bind wp1' (fun x -> wp)
+
+   From the IH where have 
+                forall q.  G |= wp1 q (asHeap H) ==> wp1' q (asHeap H')
+
+   Our goal is, for post:
+
+           G |=     wp1  (fun x h2 -> wp post h2) (asHeap H)
+               ==>  wp1' (fun x h2 -> wp post h2) (asHeap H')
+
+   Which we prove by instantiating the IH. 
+
+=======================
+Case IS-AppE1, IS-If0E0  
+=======================
+        Both are context rules, and the reasoning is analogous to IS-AppE2
+
+
+==============
+Case IS-LetRec
+==============
+
+The reasoning is essentially two applications of IS-Beta, with a
+subtyping proof as in the reasoning in the case of PS-LetRec, in case
+the fix point is pure but the argument is not.
+
+
+======================
+Case IS-If0 and IS-IfS
+======================
+
+Identical to the reasoning in PS-If0 and PS-IfS, except simpler.
+Since, in the inversion-for-if, we do not need to consider the C4.R
+case.
+--------------------------------------------------------------------------------
+=======================
+Lemma: Progress for ALL:
+=======================
+      forall H, e, M, t, wp, post.
+           |- e : ALL t wp
+       /\  |= wp post
+     ==>  (H, e) ~> (H', e')
+       \/ e is a value
+
+Proof: Progress for Tiny-F* is not very interesting, since simple
+       typing ensures it. 
+
+       This is an easy induction over the typing judgment, using each
+       inversion lemma as needed. A canonical forms lemma for funtion
+       types and integer constants is also trivial.
+
+--------------------------------------------------------------------------------
+====================================
+Theorem (Partial Correctness for ALL)
+====================================
+
+If
+
+(H1) . |- e : ALL t wp
+(H2) . |- p : K_Post_ALL(t)
+(H3) . |- wp p (asHeap H)
+
+then 
+
+either e is a value and . |= p e (asHeap H), 
+
+or exists H', e', wp' s.t.
+
+   (a) (H, e) -> (H', e')
+   (b) . |- e' : ALL t wp'
+   (c) . |= wp' p (asHeap H')
+
+Proof:
+------
+
+Case (e is a value): 
+
+     We use Lemma inversion-for-values to derive:
+
+     . |= down_ALL (wp ==> lift_ALL (ret v))
+
+     or
+
+     . |= forall q h. wp q h ==> post q h
+
+     We instantiate q and h with post as (asHeap) respectively and use
+     (H3) to complete the proof.
+
+Case (e is not a value):     
+
+Using Progress with (1), we get (a). 
+We then use Lemma Preservation-of-typing-for-CBV-reduction, to get (b) and (c). 
+--------------------------------------------------------------------------------
+====================================
+Theorem (Total Correctness for PURE)
+====================================
+
+If
+
+(1) . |- e : Pure t wp
+(2) . |- p : K_Post_Pure t
+(3) . |= wp p
+
+then forall H, exists v s.t.
+
+(a) (H, e) ~>* (H, v)
+(b) . |= p v
+
+
+Proof:
+-------
+
+(a) follows from normalization theorem (below)
+
+For (b), we use 
+
+Pure-CBV-reductions-are-included-in-pure-reduction to show that
+  (I1)   e ~>* v               
+
+Next, we use Lemma Preservation-of-typing-on-pure-reduction to show
+that . |- v : Pure t wp
+
+Then, we use the Lemma inversion-for-values to show:
+    . |= downPURE (wp ==>PURE ret v)
+Or  . |= forall post. wp post ==> post v
+which we insantiate with p for the goal. 
+
+--------------------------------------------------------------------------------
+====================================
+Theorem Normalization for pure terms
+====================================
+
+  We assume given an ambient partial, well-founded ordering < on
+  expressions. We denote by SN the set of strongly normalizing
+  expressions for the *weak* pure reduction only - excluding
+  reduction below binders and in types. This weak pure reduction
+  is written →.
+
+  The set of expressions is denoted by Λ_e.
+  The set of values is denoted by Λ_v ⊆ Λ_e.
+
+  Way say that an environment is consistent if it is not possible
+  to derive `Γ ⊨ false`. We also assume that the logic is faithful to
+  the ordering by, requiring that if Γ is consistent and `Γ ⊨ v1 << v2`,
+  then `v1 < v2`.
+
+  CR Candidates
+--------------------------------------------------------------------
+
+  C^Tot_Type = the set of the subsets of expressions R s.t.
+
+    C1. SN ⊆ R
+    C2. R is closed by pure reduction
+    C3. R is closed by inversion of the pure reduction of neutral terms.
+
+    where neutral terms are all terms but lambdas abstractions,
+    fixpoints and datatype constructors (unit, bool, int).
+
+  C^M = P(Λ_e)
+
+  C^M_(x:τ → κ) =
+    { f : { • } → C_κ }
+
+
+  Interpretation of types
+--------------------------------------------------------------------
+
+  [Pure t wp] = { e ∈ SN | e ∈ [t] ∧ ∃ phi, Γ ⊨ wp phi } 
+
+  [M t _] = [t] otherwise
+
+  [int]  = { e | e →* n  }
+  [unit] = { e | e →* () }
+
+  [fun (x:t) -> u] = • ↦ [u]
+  [t e] = [t](•)
+
+  [x:t1 → M t2 phi] =
+    { e | ∀ v ∈ [t1] ∩ Λ_v, (e v) ∈ [M t2 phi] }
+
+
+  Properties
+--------------------------------------------------------------------
+
+  – If `M τ _` is well-formed of kind κ, then [τ] ∈ C^M_κ
+
+Proof.
+  The proof is standard and done by direct induction on the
+  kinding judgment.
+Qed.
+
+
+  – If `M τ phi <: M' τ' phi'`, then [M τ phi] ⊆ [M' τ' phi'].
+
+Proof. Direct induction on the subtyping relation. Qed.
+
+
+  – If e is well-formed of type M τ _ and consistent, then e ∈ [M τ]
+
+Proof.
+    By induction on the derivation Γ ⊢ e : τ. If τ is not of
+    the form `Tot _`, then, this is immediate. Otherwise, we
+    do a case analysis on the last rule used, detailing
+    non-trivial cases:
+
+    *  The case for the abstraction, application and subtyping are
+       standard, using candidate variance by subtyping for the last
+       one.
+
+    *  For the [Fix] case (using the notation of the rule), by
+       (C3.), it is sufficient to prover that for any v ∈ [tx] ∩ Λ_v,
+       e{tx / x, fix f^d (x : t) = e / f} ∈ [Pure t'' _]. The proof
+       is done by <-well-founded induction in the normal form of
+       (d v), that is strongly normalizing by induction hypothesis.
+Qed.
+
+
+  – If e is well-formed of type `Tot τ` and consistent, then e ∈ SN
+
+Proof. Direct corollary. Qed.
+--------------------------------------------------------------------------------
