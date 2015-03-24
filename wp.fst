@@ -1,5 +1,6 @@
 module WeakestPrecondition
 open Expressions
+open Constructive
 
 (* Formulas *)
 type form =
@@ -10,7 +11,49 @@ type form =
 | FForall : #a:Type -> (a -> form) -> form
 | FEq     : #a:Type -> a -> a -> form
 
-assume type valid : form -> Type
+type invalid : form -> Type = 
+  | INot        : #f1:form    -> 
+                  valid f1    -> 
+                  invalid (FNot f1)
+  | IForall     : #a:Type     ->
+                  #f:(a -> Tot form) ->
+                  #x:a        ->
+                  invalid (f x)  ->
+                  invalid (FForall f)
+
+and valid : form -> Type =
+  | VTrue       : valid FTrue
+  | VNot        : #f1:form    -> 
+                  invalid f1  -> 
+                  valid (FNot f1)
+  | VImplFalse  : #f1:form    -> 
+                  f2:form     ->
+                  invalid f1  -> 
+                  valid (FImpl f1 f2)
+  | VImplTrue   : f1:form     ->
+                  #f2:form    ->
+                  valid f2    ->
+                  valid (FImpl f1 f2)
+  | VAnd        : #f1:form    -> 
+                  #f2:form    -> 
+                  valid f1    -> 
+                  valid f2    -> 
+                  valid (FAnd f1 f2)
+  | VForall     : #a:Type     ->
+                  #f:(a -> Tot form){forall (x:a) . exists (p:valid (f x)) . True} ->
+                  valid (FForall f)
+  | VEq         : #a:Type     ->
+                  x:a         ->
+                  valid (FEq x x)
+
+(*
+val f: v:form -> Tot (r:bool{r = true <==> (exists (p:valid v). True)})
+let rec f v = match v with
+| FTrue -> true
+| FNot v' -> not (f v')
+| _ -> false
+*)
+
 
 (* Predicates (aka. assertions) *)
 type pred = heap -> Tot form
@@ -90,10 +133,6 @@ let rec eval c h0 =
           (|h2, EWhileLoop be cb i p1 p2|)
      else (|h0, EWhileEnd be cb i|)
 
-(* TODO: remove all implicit arguments (#) from reval and redo the
-         proofs within eval. Hint: do it one rule at a time. *)
-
-(* TODO: add repeat-until to com and extend reval and eval accordingly *)
 
 
 (* Hoare logic *)
@@ -102,11 +141,16 @@ let rec eval c h0 =
 type hoare (p:pred) (c:com) (q:pred) : Type =
   (forall h h'. reval c h h' ==> valid (p h) ==> valid (q h'))
 
+(* hoare constructive *)
+type hoare_c (p:pred) (c:com) (q:pred) : Type =
+  (h:heap -> h':heap -> reval c h h' -> valid (p h) -> valid (q h'))
+
 val pred_sub : id -> aexp -> pred -> Tot pred
 let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
 
-assume val hoare_assign : q:pred -> x:id -> e:aexp ->
-  Lemma (hoare (pred_sub x e q) (Assign x e) q)
+val hoare_assign : q:pred -> x:id -> e:aexp ->
+  Lemma (hoare_c (pred_sub x e q) (Assign x e) q)
+let hoare_assign q x e = admit()
 
 val pred_impl : pred -> pred -> Tot form
 let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
