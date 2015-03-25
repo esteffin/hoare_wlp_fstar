@@ -15,11 +15,29 @@ type invalid : form -> Type =
   | INot        : #f1:form    -> 
                   valid f1    -> 
                   invalid (FNot f1)
+  | IImpl       : #f1:form    ->
+                  #f2:form    ->
+                  valid f1    ->
+                  invalid f2  ->
+                  invalid (FImpl f1 f2)
+  | IAndL       : #f1:form    ->
+                  f2:form     ->
+                  invalid f1  ->
+                  invalid (FAnd f1 f2)
+  | IAndR       : f1:form    ->
+                  #f2:form    ->
+                  invalid f1  ->
+                  invalid (FAnd f1 f2)
   | IForall     : #a:Type     ->
                   #f:(a -> Tot form) ->
                   #x:a        ->
                   invalid (f x)  ->
                   invalid (FForall f)
+  | IEq         : #a:Type     ->
+                  x1:a        ->
+		  x2:a{x1 <> x2} ->
+		  invalid (FEq x1 x2)
+
 
 and valid : form -> Type =
   | VTrue       : valid FTrue
@@ -45,6 +63,7 @@ and valid : form -> Type =
   | VEq         : #a:Type     ->
                   x:a         ->
                   valid (FEq x x)
+
 
 (*
 val f: v:form -> Tot (r:bool{r = true <==> (exists (p:valid v). True)})
@@ -143,15 +162,14 @@ type hoare (p:pred) (c:com) (q:pred) : Type =
 
 (* hoare constructive *)
 type hoare_c (p:pred) (c:com) (q:pred) : Type =
-  (h:heap -> h':heap -> reval c h h' -> valid (p h) -> valid (q h'))
+  (#h:heap -> #h':heap -> reval c h h' -> valid (p h) -> valid (q h'))
 
 val pred_sub : id -> aexp -> pred -> Tot pred
 let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
-
-val hoare_assign : q:pred -> x:id -> e:aexp ->
-  Lemma (hoare_c (pred_sub x e q) (Assign x e) q)
-let hoare_assign q x e = admit()
-
+(*
+val hoare_assign : q:pred -> x:id -> e:aexp -> hoare_c (pred_sub x e q) (Assign x e) q
+let hoare_assign q x e = fun h h' p vh -> 
+*)
 val pred_impl : pred -> pred -> Tot form
 let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
 
@@ -160,19 +178,31 @@ assume val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com -
                 /\ valid (pred_impl p p') /\ valid (pred_impl q' q)))
         (ensures (hoare p c q))
 
-assume val hoare_skip : p:pred -> Lemma (hoare p Skip p)
+val hoare_skip : p:pred -> Tot (hoare_c p Skip p)
+let hoare_skip p = fun h h' pr vph -> vph 
 
-assume val hoare_seq : p:pred -> q:pred -> r:pred -> c1:com -> c2:com ->
-  Lemma (requires (hoare p c1 q /\ hoare q c2 r))
-        (ensures (hoare p (Seq c1 c2) r))
+
+val hoare_seq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred -> hpq : hoare_c p c1 q -> hqr:hoare_c q c2 r ->
+        Tot (hoare_c p (Seq c1 c2) r)
+let hoare_seq p c1 q c2 r hpq hqr = 
+fun h1 h3 pr vph1 ->
+let ESeq r12 r23 = pr in 
+let vph2= hpq r12 vph1 in
+hqr r23 vph2
 
 val bpred : bexp -> Tot pred
 let bpred be h = FEq bool (eval_bexp h be) true
 
-assume val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com -> Lemma
-        (requires (hoare (fun h -> FAnd (p h)       (bpred be h))  t q /\
-                   hoare (fun h -> FAnd (p h) (FNot (bpred be h))) e q))
-        (ensures (hoare p (If be t e) q))
+val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
+hoare_c (fun h -> FAnd (p h) (bpred be h))  t q ->
+hoare_c (fun h -> FAnd (p h) (FNot (bpred be h))) e q ->
+Tot (hoare_c p (If be t e) q)
+let hoare_if p q be t e hthen helse = fun h h' pr vh ->
+match pr with
+| EIfTrue be cthen celse rthen -> hthen rthen (VAnd vh (VEq true))
+| EIfFalse be cthen celse relse -> helse relse (VAnd vh (VNot (IEq false true)))
+
+(*
 
 (* this is weaker than usual and can only show the annotated invariant *)
 assume val hoare_while : p:pred -> be:bexp -> c:com -> Lemma
@@ -209,3 +239,4 @@ let rec wlp_sound c q =
 
 assume val wlp_weakest : c:com -> p:pred -> q:pred ->
   Lemma (requires (hoare p c q)) (ensures (valid (pred_impl p (wlp c q))))
+  *)
