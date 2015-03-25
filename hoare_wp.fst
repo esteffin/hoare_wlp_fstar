@@ -43,13 +43,9 @@ and valid : form -> Type =
   | VNot        : #f1:form    -> 
                   invalid f1  -> 
                   valid (FNot f1)
-  | VImplFalse  : #f1:form    -> 
-                  f2:form     ->
-                  invalid f1  -> 
-                  valid (FImpl f1 f2)
-  | VImplTrue   : f1:form     ->
-                  #f2:form    ->
-                  valid f2    ->
+  | VImpl       : #f1:form    -> 
+                  #f2:form     ->
+                  (f : valid f1 -> valid f2) -> 
                   valid (FImpl f1 f2)
   | VAnd        : #f1:form    -> 
                   #f2:form    -> 
@@ -57,8 +53,9 @@ and valid : form -> Type =
                   valid f2    -> 
                   valid (FAnd f1 f2)
   | VForall     : #a:Type     ->
-                  #f:(a -> Tot form){forall (x:a) . exists (p:valid (f x)) . True} ->
-                  valid (FForall f)
+                  #p:(a -> Tot form)->
+                  f: (x:a-> Tot (valid (p x)))->
+                  valid (FForall p)
   | VEq         : #a:Type     ->
                   x:a         ->
                   valid (FEq x x)
@@ -166,17 +163,26 @@ type hoare_c (p:pred) (c:com) (q:pred) : Type =
 
 val pred_sub : id -> aexp -> pred -> Tot pred
 let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
-(*
-val hoare_assign : q:pred -> x:id -> e:aexp -> hoare_c (pred_sub x e q) (Assign x e) q
-let hoare_assign q x e = fun h h' p vh -> 
-*)
+
+val hoare_assign : q:pred -> x:id -> e:aexp -> Tot (hoare_c (pred_sub x e q) (Assign x e) q)
+let hoare_assign q x e = fun h h' pr (vh:valid (pred_sub x e q h)) -> vh
+
+
 val pred_impl : pred -> pred -> Tot form
 let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
 
-assume val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
-  Lemma (requires (hoare p' c q'
-                /\ valid (pred_impl p p') /\ valid (pred_impl q' q)))
-        (ensures (hoare p c q))
+val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
+hoare_c p' c q' -> valid (pred_impl p p') -> valid (pred_impl q' q) -> Tot (hoare_c p c q)
+let hoare_consequence p p' q q' c hpcq' vpp' vqq' = fun h h' pr (vph:valid (p h)) -> 
+let VForall fpp' = vpp' in
+assert (is_VImpl (fpp' h)); (*BUG: adding this assert makes the compilation explode*)
+let VImpl fpp' = fpp' h in
+let vpph = fpp' vph in
+let vqphp = hpcq' pr vpph in
+let VForall fqq' = vqq' in
+let VImpl fqq'   = fqq' vqphp in
+fqq' vqphp
+
 
 val hoare_skip : p:pred -> Tot (hoare_c p Skip p)
 let hoare_skip p = fun h h' pr vph -> vph 
