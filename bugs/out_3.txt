@@ -1,0 +1,8 @@
+../bin/fstar.exe --fstar_home .. ../lib/constr.fst exp.fst hoare_wp.fst
+
+Unexpected error; please file a bug report, ideally with a minimized version of the source program that triggered the error.
+(unknown(0,0-0,0)) Impossible: Typ_unknown
+<UNKNOWN>
+<UNKNOWN>
+
+make: *** [hoare_wp] Error 1
