@@ -1,6 +1,5 @@
 module WeakestPrecondition
 open Expressions
-open Constructive
 
 (* Formulas *)
 type form =
@@ -44,13 +43,9 @@ and valid : form -> Type =
   | VNot        : #f1:form    -> 
                   invalid f1  -> 
                   valid (FNot f1)
-  | VImplFalse  : #f1:form    -> 
-                  f2:form     ->
-                  invalid f1  -> 
-                  valid (FImpl f1 f2)
-  | VImplTrue   : f1:form     ->
-                  #f2:form    ->
-                  valid f2    ->
+  | VImpl       : #f1:form    -> 
+                  #f2:form     ->
+                  (f : valid f1 -> valid f2) -> 
                   valid (FImpl f1 f2)
   | VAnd        : #f1:form    -> 
                   #f2:form    -> 
@@ -58,8 +53,9 @@ and valid : form -> Type =
                   valid f2    -> 
                   valid (FAnd f1 f2)
   | VForall     : #a:Type     ->
-                  #f:(a -> Tot form){forall (x:a) . exists (p:valid (f x)) . True} ->
-                  valid (FForall f)
+                  #p:(a -> Tot form)->
+                  f: (x:a-> Tot (valid (p x)))->
+                  valid (FForall p)
   | VEq         : #a:Type     ->
                   x:a         ->
                   valid (FEq x x)
@@ -127,7 +123,7 @@ type reval : com -> heap -> heap -> Type =
 (* Defining a new eval that is correct with respect to reval
    (needs to be proved in intrinsic (+ constructive) style(s),
    because eval has side-effects) *)
-(*
+
 val eval : c:com -> h0:heap -> Dv (|h1:heap * reval c h0 h1|)
 let rec eval c h0 =
   match c with
@@ -152,7 +148,7 @@ let rec eval c h0 =
           let (|h2, p2|) = eval c  h1 in
           (|h2, EWhileLoop be cb i p1 p2|)
      else (|h0, EWhileEnd be cb i|)
-*)
+
 
 
 (* Hoare logic *)
@@ -167,17 +163,26 @@ type hoare_c (p:pred) (c:com) (q:pred) : Type =
 
 val pred_sub : id -> aexp -> pred -> Tot pred
 let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
-(*
-val hoare_assign : q:pred -> x:id -> e:aexp -> hoare_c (pred_sub x e q) (Assign x e) q
-let hoare_assign q x e = fun h h' p vh -> 
-*)
+
+val hoare_assign : q:pred -> x:id -> e:aexp -> Tot (hoare_c (pred_sub x e q) (Assign x e) q)
+let hoare_assign q x e = fun h h' pr (vh:valid (pred_sub x e q h)) -> vh
+
+
 val pred_impl : pred -> pred -> Tot form
 let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
 
-assume val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
-  Lemma (requires (hoare p' c q'
-                /\ valid (pred_impl p p') /\ valid (pred_impl q' q)))
-        (ensures (hoare p c q))
+val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
+hoare_c p' c q' -> valid (pred_impl p p') -> valid (pred_impl q' q) -> Tot (hoare_c p c q)
+let hoare_consequence p p' q q' c hpcq' vpp' vqq' = fun h h' pr (vph:valid (p h)) -> 
+let VForall fpp' = vpp' in
+assert (is_VImpl (fpp' h)); (#BUG: adding this assert makes the compilation explode*)
+let VImpl fpp' = fpp' h in
+let vpph = fpp' vph in
+let vqphp = hpcq' pr vpph in
+let VForall fqq' = vqq' in
+let VImpl fqq'   = fqq' vqphp in
+fqq' vqphp
+
 
 val hoare_skip : p:pred -> Tot (hoare_c p Skip p)
 let hoare_skip p = fun h h' pr vph -> vph 
@@ -214,9 +219,17 @@ assume val hoare_while : p:pred -> be:bexp -> c:com -> Lemma
 
 (* Weakest Liberal Precondition (aka. predicate transformer semantics) *)
 
-val fif : form -> form -> form -> Tot form
-let fif fg ft fe = FAnd (FImpl       fg  ft)
-                        (FImpl (FNot fg) fe)
+val pand : pred -> pred -> Tot pred
+let pand p1 p2 h = FAnd (p1 h) (p2 h)
+
+val pimpl : pred -> pred -> Tot pred
+let pimpl p1 p2 h = FImpl (p1 h) (p2 h)
+
+val pnot : pred -> Tot pred
+let pnot p h = FNot (p h)
+
+val pif : pred -> pred -> pred -> Tot pred
+let pif pg pt pe = pand (pimpl pg pt) (pimpl (pnot pg) pe)
 
 val wlp : com -> pred -> Tot pred
 let rec wlp c q =
@@ -224,10 +237,8 @@ let rec wlp c q =
   | Skip -> q
   | Assign x e -> pred_sub x e q
   | Seq c1 c2 -> wlp c1 (wlp c2 q)
-
-  | If be st se -> fun h -> fif (bpred be h) ((wlp st q) h) ((wlp se q) h)
-
-  | While be c i -> fun h -> FAnd (i h) (fif (bpred be h) ((wlp c i) h) (q h))
+  | If be ct ce -> pif (bpred be) (wlp ct q) (wlp ce q)
+  | While be c' i -> pand i (pif (bpred be) (wlp c' i) q)
 
 val wlp_sound : c:com -> q:pred -> Lemma (hoare (wlp c q) c q)
 let rec wlp_sound c q =
@@ -237,7 +248,42 @@ let rec wlp_sound c q =
   | Seq c1 c2 ->
      (wlp_sound c2 q; wlp_sound c1 (wlp c2 q);
       hoare_seq (wlp c1 (wlp c2 q)) (wlp c2 q) q c1 c2)
-  | _ -> admit() (* need more definitions to prove the rest *)
+  | _ -> admit() (* need more definitions to prove the rest formally *)
+
+(* Informal proofs:
+
+Case: c = if be then st else se
+-------------------------------
+
+to show:
+{ if be then wlp ct q else wlp ce q } if be then ct else ce { q }
+
+by hoare_if, still to show:
+1. {     be /\ if be then wlp ct q else wlp ce q } ct { q }
+2. { not be /\ if be then wlp ct q else wlp ce q } ce { q }
+
+by consequence (with logical equivalence in pre), still to show:
+1. { wlp ct q } ct { q }
+2. { wlp ce q } ce { q }
+
+both of these are immediate from the induction hypothesis
+
+
+Case: c = while be do c' inv i
+------------------------------
+
+                            -------------???????
+                            { i /\ be } c' { i }
+---------trivial     ---------------------------------------     -------???????
+i /\ ... ==> i       { i } while be do c' inv i { i /\ ~be }     i /\ ~be ==> q
+------------------------------------------------------------------------------- Conseq
+    { i /\ if be then wlp c i else q } while be do c' inv i { q }
+
+
+to show:
+{ i /\ if be then wlp c i else q } while be do c' inv i { q }
+
+*)
 
 assume val wlp_weakest : c:com -> p:pred -> q:pred ->
   Lemma (requires (hoare p c q)) (ensures (valid (pred_impl p (wlp c q))))
