@@ -3,7 +3,7 @@ FSTAR_BIN=fstar
 FSTAR=$(FSTAR_HOME)/bin/$(FSTAR_BIN) --fstar_home $(FSTAR_HOME)
 STATE=$(FSTAR_HOME)/lib/set.fst $(FSTAR_HOME)/lib/heap.fst stperm.fst
 
-all : wp
+all : hoare_wp
 
-wp : exp.fst wp.fst
-	$(FSTAR) ../lib/constr.fst exp.fst wp.fst
+hoare_wp : exp.fst hoare_wp.fst
+	$(FSTAR) ../lib/constr.fst exp.fst hoare_wp.fst
