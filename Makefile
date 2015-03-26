@@ -20,4 +20,4 @@ deduce1 : deduce1.fst
 	$(FSTAR) $(FSTAR_HOME)/lib/list.fst deduce1.fst
 
 deduce2 : deduce2.fst
-	$(FSTAR) deduce2.fst
+	$(FSTAR) exp.fst deduce2.fst

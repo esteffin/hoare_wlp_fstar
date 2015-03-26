@@ -6,19 +6,14 @@ type hval =
   | HvVar  : nat  -> hval
 
 type form =
+| FFalse  : form
 | FImpl   : form -> form -> form
 | FAnd    : form -> form -> form
-| FForall : form -> form    (* forall h : heap. form -- deBruijn *)
+| FForall : form -> form         (* forall h : heap. form -- deBruijn *)
 | FBexp   : bexp -> hval -> form (* boolean expression in heap h, rather weak *)
 
-val ftrue : form
-let ftrue = FBexp BTrue (HvVar 0)
-
-val ffalse : form
-let ffalse = FBexp BFalse (HvVar 0)
-
 val fnot : form -> Tot form
-let fnot f = FImpl f ffalse
+let fnot f = FImpl f FFalse
 
 (*
 val feq : aexp -> aexp -> hval -> Tot form
@@ -26,6 +21,8 @@ let feq a1 a2 hv = FBexp (BEq a1 a2) hv
 *)
 
 assume val subst : nat -> heap -> form -> Tot form
+
+assume val shift_up_env : list form -> Tot (list form)
 
 type deduce : list form -> form -> Type =
   | DAxiom : #fs : list form ->
@@ -47,7 +44,7 @@ type deduce : list form -> form -> Type =
   | DFalseElim :
              #fs:list form ->
              f:form ->
-             deduce fs ffalse ->
+             deduce fs FFalse ->
              deduce fs f
   | DAndIntro :
              #fs:list form ->
@@ -68,16 +65,10 @@ type deduce : list form -> form -> Type =
              f2:form ->
              deduce fs (FAnd f1 f2) ->
              deduce fs f2
-  | DSubst :
+  | DForallIntro :
              #fs:list form ->
              #f:form ->
-             h:heap ->
-             deduce fs f ->
-             deduce fs (subst 0 h f)
-  | DForallIntro : 
-             #fs:list form ->
-             #f:form ->
-             deduce fs f ->
+             deduce (shift_up_env fs) f ->
              deduce fs (FForall f)
   | DForallElim :
              #fs:list form ->
@@ -86,12 +77,18 @@ type deduce : list form -> form -> Type =
              deduce fs (FForall f) ->
              h:heap ->
              deduce fs (subst 0 h f)
-  | DBexp :
+  | DBexpIntro :
               fs:list form ->
               b:bexp ->
               h:heap{eval_bexp h b = true} ->
               deduce fs (FBexp b (HvHeap h))
-(*
+(* no elimination for FBexp
+  | DBexpElim :
+              fs:list form ->
+              b:bexp ->
+              deduce fs (FBexp b (HvHeap h)) ->
+              deduce ???
+... in particular no replacing of equals by equals
   | DEqSubst :
               #fs:list form ->
               #a:Type ->

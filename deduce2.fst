@@ -1,12 +1,14 @@
 module Deduce2
+open Expressions
 
 (* Formulas *)
 type form =
 | FFalse  : form
 | FImpl   : form -> form -> form
 | FAnd    : form -> form -> form
-| FForall : #a:Type -> (a -> form) -> form
+| FForall : #a:Type -> (a -> Tot form) -> form
 | FEq     : #a:Type -> a -> a -> form
+| FBexp   : bexp -> heap -> form
 
 val fnot : form -> Tot form
 let fnot f = FImpl f FFalse
@@ -14,8 +16,14 @@ let fnot f = FImpl f FFalse
 val ftrue : form
 let ftrue = FEq () ()
 
-(* Why not do the forall trick from deduce1 also for implication? ...
-   get rid of the context! *)
+val ffor : form -> form -> Tot form
+(*
+let ffor f1 f2 = fnot (FAnd (fnot f1) (fnot f2))
+(f1 => false) /\ (f2 => false) ==> false
+*)
+let ffor f1 f2 = FImpl (fnot f1) f2
+(* (f1 => false) => f2 *)
+
 type deduce : form -> Type =
   | DFalseElim :
              f:form ->
@@ -24,12 +32,12 @@ type deduce : form -> Type =
   | DImplIntro :
              f1:form ->
              f2:form ->
-             (deduce f1 -> deduce f2) -> (* <-- meta level implication *)
+             (deduce f1 -> Tot (deduce f2)) -> (* <-- meta level implication *)
              deduce (FImpl f1 f2)
   | DImplElim :
              f1:form ->
              f2:form ->
-             (deduce (FImpl f1 f2)) ->
+             deduce (FImpl f1 f2) ->
              deduce f1 ->
              deduce f2
   | DAndIntro :
@@ -51,7 +59,7 @@ type deduce : form -> Type =
   | DForallIntro : 
              #a:Type ->
              #f:(a->Tot form) ->
-             (x:a -> deduce (f x)) -> (* <-- meta level quantification *)
+             (x:a -> Tot (deduce (f x))) -> (* <-- meta level quantification *)
              deduce (FForall f)
   | DForallElim :
              #a:Type ->
@@ -59,21 +67,10 @@ type deduce : form -> Type =
              deduce (FForall f) ->
              x:a ->
              deduce (f x)
-  | DEqRefl : #a:Type ->
+  | DEqRefl : 
+              #a:Type ->
               e:a ->
               deduce (FEq e e)
-  | DEqSymm : #a:Type ->
-              e1:a ->
-              e2:a ->
-              deduce (FEq e1 e2) ->
-              deduce (FEq e2 e1)
-  | DEqTran : #a:Type ->
-              e1:a ->
-              e2:a ->
-              e3:a ->
-              deduce (FEq e1 e2) ->
-              deduce (FEq e2 e3) ->
-              deduce (FEq e1 e3)
   | DEqSubst :
               #a:Type ->
               e1:a ->
@@ -82,3 +79,27 @@ type deduce : form -> Type =
               deduce (FEq e1 e2) ->
               deduce (f e1) ->
               deduce (f e2)
+  | DExMid :
+              f:form ->
+              deduce (ffor f (fnot f))
+  | DBexpIntro :
+              b:bexp ->
+              h:heap{eval_bexp h b = true} ->
+              deduce (FBexp b h)
+
+(* Derivable rules
+  | DEqSymm : 
+              #a:Type ->
+              e1:a ->
+              e2:a ->
+              deduce (FEq e1 e2) ->
+              deduce (FEq e2 e1)
+  | DEqTran : 
+              #a:Type ->
+              e1:a ->
+              e2:a ->
+              e3:a ->
+              deduce (FEq e1 e2) ->
+              deduce (FEq e2 e3) ->
+              deduce (FEq e1 e3)
+ *)
