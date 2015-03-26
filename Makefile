@@ -1,4 +1,4 @@
-FSTAR_HOME=../pub
+FSTAR_HOME=..
 FSTAR_BIN=fstar.exe
 FSTAR=$(FSTAR_HOME)/bin/$(FSTAR_BIN) --fstar_home $(FSTAR_HOME)
 
@@ -6,6 +6,9 @@ all : hoare_wp
 
 hoare_wp : exp.fst hoare_wp.fst
 	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst exp.fst hoare_wp.fst
+
+hoare_wp_annot : exp.fst hoare_wp.fst
+	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst exp.fst hoare_wp.fst --log_types
 
 shallow : shallow.fst
 	$(FSTAR) shallow.fst

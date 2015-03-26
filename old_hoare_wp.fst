@@ -3,110 +3,66 @@ open Expressions
 
 (* Formulas *)
 type form =
-| FFalse  : form
+| FTrue   : form
+| FNot    : form -> form
 | FImpl   : form -> form -> form
 | FAnd    : form -> form -> form
-| FForall : #a:Type -> (a -> Tot form) -> form
+| FForall : #a:Type -> (a -> form) -> form
 | FEq     : #a:Type -> a -> a -> form
-| FBexp   : bexp -> heap -> form
 
-val fnot : form -> Tot form
-let fnot f = FImpl f FFalse
+type invalid : form -> Type = 
+  | INot        : #f1:form    -> 
+                  valid f1    -> 
+                  invalid (FNot f1)
+  | IImpl       : #f1:form    ->
+                  #f2:form    ->
+                  valid f1    ->
+                  invalid f2  ->
+                  invalid (FImpl f1 f2)
+  | IAndL       : #f1:form    ->
+                  f2:form     ->
+                  invalid f1  ->
+                  invalid (FAnd f1 f2)
+  | IAndR       : f1:form    ->
+                  #f2:form    ->
+                  invalid f1  ->
+                  invalid (FAnd f1 f2)
+  | IForall     : #a:Type     ->
+                  #f:(a -> Tot form) ->
+                  #x:a        ->
+                  invalid (f x)  ->
+                  invalid (FForall f)
+  | IEq         : #a:Type     ->
+                  x1:a        ->
+		  x2:a{x1 <> x2} ->
+		  invalid (FEq x1 x2)
 
-val ftrue : form
-let ftrue = FEq () ()
 
-val ffor : form -> form -> Tot form
-(*
-let ffor f1 f2 = fnot (FAnd (fnot f1) (fnot f2))
-(f1 => false) /\ (f2 => false) ==> false
-*)
-let ffor f1 f2 = FImpl (fnot f1) f2
-(* (f1 => false) => f2 *)
-
-type deduce : form -> Type =
-  | DFalseElim :
-             f:form ->
-             deduce FFalse ->
-             deduce f
-  | DImplIntro :
-             #f1:form ->
-             #f2:form ->
-             (deduce f1 -> Tot (deduce f2)) -> (* <-- meta level implication *)
-             deduce (FImpl f1 f2)
-  | DImplElim :
-             #f1:form ->
-             #f2:form ->
-             deduce (FImpl f1 f2) ->
-             deduce f1 ->
-             deduce f2
-  | DAndIntro :
-             #f1:form ->
-             #f2:form ->
-             deduce f1 ->
-             deduce f2 ->
-             deduce (FAnd f1 f2)
-  | DAndElim1 :
-             #f1:form ->
-             #f2:form ->
-             deduce (FAnd f1 f2) ->
-             deduce f1
-  | DAndElim2 :
-             #f1:form ->
-             #f2:form ->
-             deduce (FAnd f1 f2) ->
-             deduce f2
-  | DForallIntro : 
-             #a:Type ->
-             #f:(a->Tot form) ->
-             (x:a -> Tot (deduce (f x))) -> (* <-- meta level quantification *)
-             deduce (FForall f)
-  | DForallElim :
-             #a:Type ->
-             f:(a->Tot form) ->
-             deduce (FForall f) ->
-             x:a ->
-             deduce (f x)
-  | DEqRefl : 
-              #a:Type ->
-              e:a ->
-              deduce (FEq e e)
-  | DEqSubst :
-              #a:Type ->
-              #e1:a ->
-              #e2:a ->
-              #f:(a -> Tot form) ->
-              deduce (FEq e1 e2) ->
-              deduce (f e1) ->
-              deduce (f e2)
-  | DExMid :
-              f:form ->
-              deduce (ffor f (fnot f))
-  | DBexpIntro :
-              b:bexp ->
-              h:heap{eval_bexp h b = true} ->
-              deduce (FBexp b h)
-
-(* Derivable rules
-  | DEqSymm : 
-              #a:Type ->
-              e1:a ->
-              e2:a ->
-              deduce (FEq e1 e2) ->
-              deduce (FEq e2 e1)
-  | DEqTran : 
-              #a:Type ->
-              e1:a ->
-              e2:a ->
-              e3:a ->
-              deduce (FEq e1 e2) ->
-              deduce (FEq e2 e3) ->
-              deduce (FEq e1 e3)
- *)
+and valid : form -> Type =
+  | VTrue       : valid FTrue
+  | VNot        : #f1:form    -> 
+                  invalid f1  -> 
+                  valid (FNot f1)
+  | VImpl       : #f1:form    -> 
+                  #f2:form     ->
+                  (f : valid f1 -> valid f2) -> 
+                  valid (FImpl f1 f2)
+  | VAnd        : #f1:form    -> 
+                  #f2:form    -> 
+                  valid f1    -> 
+                  valid f2    -> 
+                  valid (FAnd f1 f2)
+  | VForall     : #a:Type     ->
+                  #p:(a -> Tot form)->
+                  f: (x:a-> Tot (valid (p x)))->
+                  valid (FForall p)
+  | VEq         : #a:Type     ->
+                  x:a         ->
+                  valid (FEq x x)
 
 
 (*
-val f: v:form -> Tot (r:bool{r = true <==> (exists (p:deduce v). True)})
+val f: v:form -> Tot (r:bool{r = true <==> (exists (p:valid v). True)})
 let rec f v = match v with
 | FTrue -> true
 | FNot v' -> not (f v')
@@ -199,17 +155,17 @@ let rec eval c h0 =
 
 (* Hoare triples - partial correctness (no termination) *)
 type hoare (p:pred) (c:com) (q:pred) : Type =
-  (forall h h'. reval c h h' ==> deduce (p h) ==> deduce (q h'))
+  (forall h h'. reval c h h' ==> valid (p h) ==> valid (q h'))
 
 (* hoare constructive *)
 type hoare_c (p:pred) (c:com) (q:pred) : Type =
-  (#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> deduce (q h'))
+  (#h:heap -> #h':heap -> reval c h h' -> valid (p h) -> valid (q h'))
 
 val pred_sub : id -> aexp -> pred -> Tot pred
 let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
 
 val hoare_assign : q:pred -> x:id -> e:aexp -> Tot (hoare_c (pred_sub x e q) (Assign x e) q)
-let hoare_assign q x e = fun h h' pr (vh:deduce (pred_sub x e q h)) -> vh
+let hoare_assign q x e = fun h h' pr (vh:valid (pred_sub x e q h)) -> vh
 
 
 val pred_impl : pred -> pred -> Tot form
@@ -218,29 +174,20 @@ let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
 
 val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
                         hoare_c p' c q'        -> 
-                        deduce (pred_impl p p') -> 
-                        deduce (pred_impl q' q) -> 
+                        valid (pred_impl p p') -> 
+                        valid (pred_impl q' q) -> 
                         Tot (hoare_c p c q)
 let hoare_consequence p p' q q' c hpcq' vpp' vqq' = 
-    fun h h' pr (vph:deduce (p h)) -> 
-        let vpp' = DForallElim (fun (h : heap) -> FImpl (p h) (p' h)) vpp' h in
-        admit()
-        
-(*
-  | DForallElim :
-      #a:Type ->
-      f:(a->Tot form) ->
-      deduce (FForall f) ->
-      x:a ->
-      deduce (f x)
+    fun h h' pr (vph:valid (p h)) -> 
+        let VForall fpp' = vpp' in
+        //assert (is_VImpl (fpp' h)); (*BUG: adding this assert makes the compilation explode*)
+        let VImpl fpp' = fpp' h in
+        let vpph = fpp' vph in
+        let vqphp = hpcq' pr vpph in
+        let VForall fqq' = vqq' in
+        let VImpl fqq'   = fqq' vqphp in
+        fqq' vqphp
 
-  | DImplElim :
-      #f1:form ->
-      #f2:form ->
-      deduce (FImpl f1 f2) ->
-      deduce f1 ->
-      deduce f2
-*)
 
 val hoare_skip : p:pred -> Tot (hoare_c p Skip p)
 let hoare_skip p = fun h h' pr vph -> vph 
@@ -259,16 +206,17 @@ let hoare_seq p c1 q c2 r hpq hqr =
 val bpred : bexp -> Tot pred
 let bpred be h = FEq bool (eval_bexp h be) true
 
-(*
 val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
                 hoare_c (fun h -> FAnd (p h) (bpred be h))  t q ->
-                hoare_c (fun h -> FAnd (p h) (fnot (bpred be h))) e q ->
+                hoare_c (fun h -> FAnd (p h) (FNot (bpred be h))) e q ->
                 Tot (hoare_c p (If be t e) q)
 let hoare_if p q be t e hthen helse = 
-    fun h h' pr (ph:deduce (p h)) -> (*ph -> *)
+    fun h h' pr (vh:valid (p h)) -> (*vh -> *)
         match pr with
-          | EIfTrue be cthen celse rthen -> hthen rthen (DAndIntro ph (DEqRefl true))
-          | EIfFalse be cthen celse relse -> helse relse (DAndIntro ph (DImplIntro (FEq bool false true) false))
+          | EIfTrue be cthen celse rthen -> hthen rthen (VAnd vh (VEq true))
+          | EIfFalse be cthen celse relse -> helse relse (VAnd vh (VNot (IEq false true)))
+
+(*
 
 (* this is weaker than usual and can only show the annotated invariant *)
 assume val hoare_while : p:pred -> be:bexp -> c:com -> Lemma
@@ -345,5 +293,5 @@ to show:
 *)
 
 assume val wlp_weakest : c:com -> p:pred -> q:pred ->
-  Lemma (requires (hoare p c q)) (ensures (deduce (pred_impl p (wlp c q))))
+  Lemma (requires (hoare p c q)) (ensures (valid (pred_impl p (wlp c q))))
   *)
