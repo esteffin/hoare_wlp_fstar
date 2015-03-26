@@ -14,3 +14,9 @@ bug_2 : exp.fst bug_2.fst
 
 bug_3 : exp.fst bug_3.fst
 	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst exp.fst bug_3.fst
+
+bug_5 : exp.fst bug_5.fst
+	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst exp.fst bug_5.fst
+
+bug_5b : exp.fst bug_5b.fst
+	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst exp.fst bug_5b.fst

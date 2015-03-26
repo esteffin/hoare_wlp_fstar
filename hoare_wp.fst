@@ -209,19 +209,30 @@ let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
 val hoare_assign : q:pred -> x:id -> e:aexp -> Tot (hoare_c (pred_sub x e q) (Assign x e) q)
 let hoare_assign q x e = fun h h' pr (vh:deduce (pred_sub x e q h)) -> vh
 
+val pand : pred -> pred -> Tot pred
+let pand p1 p2 h = FAnd (p1 h) (p2 h)
+
+val pimpl : pred -> pred -> Tot pred
+let pimpl p1 p2 h = FImpl (p1 h) (p2 h)
+
+val pnot : pred -> Tot pred
+let pnot p h = fnot (p h)
+
+val pif : pred -> pred -> pred -> Tot pred
+let pif pg pt pe = pand (pimpl pg pt) (pimpl (pnot pg) pe)
 
 val pred_impl : pred -> pred -> Tot form
-let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
+let pred_impl p q = FForall (pimpl p q)
 
 
 val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
                         hoare_c p' c q'        -> 
-                        deduce (FForall (fun h -> (FImpl (p h) (p' h)))) -> 
-                        deduce (FForall (fun h -> (FImpl (q' h) (q h)))) -> 
+                        deduce (pred_impl p p') -> 
+                        deduce (pred_impl q' q) -> 
                         Tot (hoare_c p c q)
 let hoare_consequence p p' q q' c hpcq' vpp' vqq' = 
     fun h h' pr (vph:deduce (p h)) -> 
-        let vpp' = DForallElim (fun (h : heap) -> FImpl (p h) (p' h)) vpp' h in
+        let vpp' = DForallElim (pimpl p p') vpp' h in
         admit()
         
 (*
@@ -275,18 +286,6 @@ assume val hoare_while : p:pred -> be:bexp -> c:com -> Lemma
 
 
 (* Weakest Liberal Precondition (aka. predicate transformer semantics) *)
-
-val pand : pred -> pred -> Tot pred
-let pand p1 p2 h = FAnd (p1 h) (p2 h)
-
-val pimpl : pred -> pred -> Tot pred
-let pimpl p1 p2 h = FImpl (p1 h) (p2 h)
-
-val pnot : pred -> Tot pred
-let pnot p h = FNot (p h)
-
-val pif : pred -> pred -> pred -> Tot pred
-let pif pg pt pe = pand (pimpl pg pt) (pimpl (pnot pg) pe)
 
 val wlp : com -> pred -> Tot pred
 let rec wlp c q =
