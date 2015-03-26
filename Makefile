@@ -10,6 +10,9 @@ hoare_wp : exp.fst hoare_wp.fst
 shallow : shallow.fst
 	$(FSTAR) shallow.fst
 
+shallow2 : shallow2.fst
+	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst shallow2.fst
+
 deduce0 : deduce1.fst
 	$(FSTAR) $(FSTAR_HOME)/lib/list.fst exp.fst deduce0.fst
 
