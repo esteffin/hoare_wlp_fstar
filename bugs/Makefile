@@ -3,7 +3,7 @@ FSTAR_BIN=fstar.exe
 FSTAR=$(FSTAR_HOME)/bin/$(FSTAR_BIN) --fstar_home $(FSTAR_HOME) --trace_error
 STATE=$(FSTAR_HOME)/lib/set.fst $(FSTAR_HOME)/lib/heap.fst stperm.fst
 
-all : bug_1 bug_2 bug_3
+all : bug_1 bug_2 bug_3 bug_4
 
 # Fixed on trunk already
 bug_1 : exp.fst bug_1.fst
