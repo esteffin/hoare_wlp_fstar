@@ -171,43 +171,50 @@ let hoare_assign q x e = fun h h' pr (vh:valid (pred_sub x e q h)) -> vh
 val pred_impl : pred -> pred -> Tot form
 let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
 
+
 val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
-hoare_c p' c q' -> valid (pred_impl p p') -> valid (pred_impl q' q) -> Tot (hoare_c p c q)
-let hoare_consequence p p' q q' c hpcq' vpp' vqq' = fun h h' pr (vph:valid (p h)) -> 
-let VForall fpp' = vpp' in
-assert (is_VImpl (fpp' h)); (*BUG: adding this assert makes the compilation explode*)
-let VImpl fpp' = fpp' h in
-let vpph = fpp' vph in
-let vqphp = hpcq' pr vpph in
-let VForall fqq' = vqq' in
-let VImpl fqq'   = fqq' vqphp in
-fqq' vqphp
+                        hoare_c p' c q'        -> 
+                        valid (pred_impl p p') -> 
+                        valid (pred_impl q' q) -> 
+                        Tot (hoare_c p c q)
+let hoare_consequence p p' q q' c hpcq' vpp' vqq' = 
+    fun h h' pr (vph:valid (p h)) -> 
+        let VForall fpp' = vpp' in
+        //assert (is_VImpl (fpp' h)); (*BUG: adding this assert makes the compilation explode*)
+        let VImpl fpp' = fpp' h in
+        let vpph = fpp' vph in
+        let vqphp = hpcq' pr vpph in
+        let VForall fqq' = vqq' in
+        let VImpl fqq'   = fqq' vqphp in
+        fqq' vqphp
 
 
 val hoare_skip : p:pred -> Tot (hoare_c p Skip p)
 let hoare_skip p = fun h h' pr vph -> vph 
 
 
-val hoare_seq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred -> hpq : hoare_c p c1 q -> hqr:hoare_c q c2 r ->
+val hoare_seq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred -> 
+        hpq : hoare_c p c1 q  -> 
+        hqr:hoare_c q c2 r    ->
         Tot (hoare_c p (Seq c1 c2) r)
 let hoare_seq p c1 q c2 r hpq hqr = 
-fun h1 h3 pr vph1 ->
-let ESeq r12 r23 = pr in 
-let vph2= hpq r12 vph1 in
-hqr r23 vph2
+    fun h1 h3 pr vph1 ->
+        let ESeq r12 r23 = pr in 
+        let vph2= hpq r12 vph1 in
+        hqr r23 vph2
 
 val bpred : bexp -> Tot pred
 let bpred be h = FEq bool (eval_bexp h be) true
 
 val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
-hoare_c (fun h -> FAnd (p h) (bpred be h))  t q ->
-hoare_c (fun h -> FAnd (p h) (FNot (bpred be h))) e q ->
-Tot (hoare_c p (If be t e) q)
+                hoare_c (fun h -> FAnd (p h) (bpred be h))  t q ->
+                hoare_c (fun h -> FAnd (p h) (FNot (bpred be h))) e q ->
+                Tot (hoare_c p (If be t e) q)
 let hoare_if p q be t e hthen helse = 
-fun h h' pr (vh:valid (p h)) -> (*vh -> *)
-match pr with
-| EIfTrue be cthen celse rthen -> hthen rthen (VAnd vh (VEq true))
-| EIfFalse be cthen celse relse -> helse relse (VAnd vh (VNot (IEq false true)))
+    fun h h' pr (vh:valid (p h)) -> (*vh -> *)
+        match pr with
+          | EIfTrue be cthen celse rthen -> hthen rthen (VAnd vh (VEq true))
+          | EIfFalse be cthen celse relse -> helse relse (VAnd vh (VNot (IEq false true)))
 
 (*
 
