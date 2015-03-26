@@ -6,7 +6,7 @@ type form =
 | FFalse  : form
 | FImpl   : form -> form -> form
 | FAnd    : form -> form -> form
-| FForall : #a:Type -> (a -> Tot form) -> form
+| FForall : (heap -> Tot form) -> form
 | FEq     : #a:Type -> a -> a -> form
 | FBexp   : bexp -> heap -> form
 
@@ -57,15 +57,13 @@ type deduce : form -> Type =
              deduce (FAnd f1 f2) ->
              deduce f2
   | DForallIntro : 
-             #a:Type ->
-             #f:(a->Tot form) ->
-             (x:a -> Tot (deduce (f x))) -> (* <-- meta level quantification *)
+             f:(heap->Tot form) ->
+             (x:heap -> Tot (deduce (f x))) -> (* <-- meta level quantification *)
              deduce (FForall f)
   | DForallElim :
-             #a:Type ->
-             f:(a->Tot form) ->
+             f:(heap->Tot form) ->
              deduce (FForall f) ->
-             x:a ->
+             x:heap ->
              deduce (f x)
   | DEqRefl : 
               #a:Type ->
@@ -218,8 +216,8 @@ let pred_impl p q = FForall (fun h -> FImpl (p h) (q h))
 
 val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
                         hoare_c p' c q'        -> 
-                        deduce (pred_impl p p') -> 
-                        deduce (pred_impl q' q) -> 
+                        deduce (FForall (fun h -> (FImpl (p h) (p' h)))) -> 
+                        deduce (FForall (fun h -> (FImpl (q' h) (q h)))) -> 
                         Tot (hoare_c p c q)
 let hoare_consequence p p' q q' c hpcq' vpp' vqq' = 
     fun h h' pr (vph:deduce (p h)) -> 
