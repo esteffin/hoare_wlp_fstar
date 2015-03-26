@@ -8,7 +8,7 @@ type form =
 | FAnd    : form -> form -> form
 | FForall : (heap -> Tot form) -> form
 | FEq     : #a:Type -> a -> a -> form
-| FBexp   : bexp -> heap -> form
+(*| FBexp   : bexp -> heap -> form*)
 
 val fnot : form -> Tot form
 let fnot f = FImpl f FFalse
@@ -69,6 +69,11 @@ type deduce : form -> Type =
               #a:Type ->
               e:a ->
               deduce (FEq e e)
+  | DNotEq :
+              #a:Type ->
+              e1:a ->
+              e2:a{e1 <> e2} ->
+              deduce (fnot (FEq e1 e2))
   | DEqSubst :
               #a:Type ->
               #e1:a ->
@@ -80,11 +85,13 @@ type deduce : form -> Type =
   | DExMid :
               f:form ->
               deduce (ffor f (fnot f))
+
+(* Derivable; see bpred below
   | DBexpIntro :
               b:bexp ->
               h:heap{eval_bexp h b = true} ->
               deduce (FBexp b h)
-
+*)
 (* Derivable rules
   | DEqSymm : 
               #a:Type ->
