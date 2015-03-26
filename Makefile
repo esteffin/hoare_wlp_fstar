@@ -6,4 +6,4 @@ STATE=$(FSTAR_HOME)/lib/set.fst $(FSTAR_HOME)/lib/heap.fst stperm.fst
 all : hoare_wp
 
 hoare_wp : exp.fst hoare_wp.fst
-	$(FSTAR) ../lib/constr.fst exp.fst hoare_wp.fst
+	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst exp.fst hoare_wp.fst
