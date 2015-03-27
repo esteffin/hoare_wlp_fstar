@@ -32,7 +32,7 @@ type deduce : form -> Type =
   | DImplIntro :
              f1:form ->
              f2:form ->
-             (deduce f1 -> (deduce f2)) -> (* <-- meta level implication *)
+             (deduce f1 -> Tot (deduce f2)) -> (* <-- meta level implication *)
              deduce (FImpl f1 f2)
   | DImplElim :
 	           f1:form ->
@@ -290,6 +290,18 @@ let rec wlp c q =
   | If be ct ce -> pif (bpred be) (wlp ct q) (wlp ce q)
   | While be c' i -> pand i (pif (bpred be) (wlp c' i) q)
 
+val proof_if_true_temp : c : pred -> p1 : pred -> p2 : pred -> h : heap -> 
+                        lhs:deduce(FAnd (pif c p1 p2 h) (c h)) -> 
+                        Tot (deduce (p1 h))
+let proof_if_true_temp c p1 p2 h lhs = 
+    let pc = DAndElim2 (pif c p1 p2 h) (c h) lhs in
+    let pcp1 = DAndElim1 ((pimpl c p1) h) ((pimpl (pnot c) p2) h) (DAndElim1 (pif c p1 p2 h) (c h) lhs) in
+    DImplElim (c h) (p1 h) pcp1 pc 
+
+val proof_if_true : c : pred -> p1 : pred -> p2 : pred -> h : heap -> Tot (deduce( FImpl (pand (pif c p1 p2) c h ) (p1 h) ))
+let proof_if_true c p1 p2 h = 
+  DImplIntro (FAnd (pif c p1 p2 h) (c h)) (p1 h) (proof_if_true_temp c p1 p2 h)
+
 val proof_if_false_temp : c : pred -> p1 : pred -> p2 : pred -> h : heap -> 
                         lhs:deduce(FAnd (pif c p1 p2 h) (c h)) -> 
                         Tot (deduce (p1 h))
@@ -298,28 +310,12 @@ let proof_if_false_temp c p1 p2 h lhs =
     let pcp1 = DAndElim1 ((pimpl c p1) h) ((pimpl (pnot c) p2) h) (DAndElim1 (pif c p1 p2 h) (c h) lhs) in
     DImplElim (c h) (p1 h) pcp1 pc 
 
-//let pif pg pt pe = pand (pimpl pg pt) (pimpl (pnot pg) pe)
-
-//(deduce (FAnd (FAnd (FImpl (c h) (p1 h)) ('e9371 c p1 p2 h lhs pc)) ('e9373 c p1 p2 h lhs pc)))
-//(deduce (FAnd (pif c p1 p2 h) (c h)))
-
-
 val proof_if_true : c : pred -> p1 : pred -> p2 : pred -> h : heap -> Tot (deduce( FImpl (pand (pif c p1 p2) c h ) (p1 h) ))
 let proof_if_true c p1 p2 h = 
   DImplIntro (FAnd (pif c p1 p2 h) (c h)) (p1 h) (proof_if_false_temp c p1 p2 h)
 
 val plouf : q : pred -> h : heap -> deduce (q h) -> Tot (deduce (q h))
 let plouf q h p = p
-
-(*
-val proof_if_true : c : pred -> p1 : pred -> p2 : pred -> h : heap -> Tot (deduce(pimpl (pand (pif c p1 p2) c) p1 h))
-let proof_if_true c p1 p2 h = 
-  let f (lhs:deduce (pand (pif c p1 p2) c h)) = 
-  	let pc = DAndElim2 lhs in
-  	let pcp1 = DAndElim1 (DAndElim1 lhs) in
-  	DImplElim ((pand (pif c p1 p2) c) h) (p1 h) pcp1 pc 
-  in DImplIntro f
-*)
 
 val wlp_sound : c:com -> q:pred -> Tot (hoare_c (wlp c q) c q)
 let rec wlp_sound c q =
@@ -333,15 +329,26 @@ let rec wlp_sound c q =
   | If be ct ce -> 
       let wlp_t = wlp_sound ct q in
       let wlp_e = wlp_sound ce q in
-      //let vpp' = DForallIntro (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) (proof_if_true (bpred be) (wlp ct q) (wlp ce q)) in 
-      //let p = (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) in
-      //let p' = wlp ct q in
-      //let hthen = hoare_consequence p p' q q ct wlp_t vpp' (DForallIntro (pimpl q q) (fun (h:heap) -> (DImplIntro (plouf q h)))) in
+      let vpp' = DForallIntro (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) (proof_if_true (bpred be) (wlp ct q) (wlp ce q)) in 
+      let p = (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) in
+      let p' = wlp ct q in
+      let hthen = hoare_consequence (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q) q q ct wlp_t vpp' (DForallIntro (pimpl q q) (fun (h:heap) -> (DImplIntro (q h) (q h) (plouf q h)))) in
+      //let helse = hoare_consequence (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q) q q ct wlp_t vpp' (DForallIntro (pimpl q q) (fun (h:heap) -> (DImplIntro (q h) (q h) (plouf q h)))) in
       admit()
   | _ -> admit() (* need more definitions to prove the rest formally *)
 
 
+
 (*
+
+hoare_c (fun h -> FAnd (p h) (fnot (bpred be h))) e q
+
+val pimpl : pred -> pred -> Tot pred
+let pimpl p1 p2 h = FImpl (p1 h) (p2 h)
+
+val pred_impl : pred -> pred -> Tot form
+let pred_impl p q = FForall (pimpl p q)
+
 
 val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
                         hoare_c p' c q'        -> 
