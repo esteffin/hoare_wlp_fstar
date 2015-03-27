@@ -268,14 +268,14 @@ let hoare_if p q be t e hthen helse =
 val hoare_while : p:pred -> be:bexp -> c:com -> 
   hoare_c (fun h -> FAnd (p h) (bpred be h)) c p ->
   Tot (hoare_c p (While be c p) (fun h -> FAnd (p h) (fnot (bpred be h))))
-let rec hoare_while p be c hbody = 
+let (*rec*) hoare_while p be c hbody = 
     fun h h' pr (ph:deduce (p h)) -> 
         match pr with
           | EWhileEnd  be cb i -> (DAndIntro ph (DNotEq false true))
           | EWhileLoop be cb i rbody rloop -> 
               let vph1 = hbody rbody (DAndIntro ph (DEqRefl true)) in
-              hoare_while p be c hbody rbody vph1
-
+              //let _ = hoare_while p be c hbody rbody vph1 in
+              magic()
           
 (*
 rbody = h cb h'
@@ -290,12 +290,6 @@ rloop = h' (While be cb i) h''
                cb:com -> i:pred ->
                reval (While be cb i) h0 h0
 
- *)
-
-let block = ()
-
-               (*
-
 hoare_c (p h && be h) b (p h)
 hoare_c (p h) (While be c p) (p h && not (be h))
 
@@ -304,7 +298,7 @@ hoare_c (p h) (While be c p) (p h && not (be h))
         #a:Type ->
         e1:a ->
         e2:a{e1 <> e2} ->
-        deduce (fnot (FEq e1 e2))
+        deduce (fnot (FEq e1 e2)) *)
 
 
 (* Weakest Liberal Precondition (aka. predicate transformer semantics) *)
@@ -318,15 +312,44 @@ let rec wlp c q =
   | If be ct ce -> pif (bpred be) (wlp ct q) (wlp ce q)
   | While be c' i -> pand i (pif (bpred be) (wlp c' i) q)
 
-val wlp_sound : c:com -> q:pred -> Lemma (hoare (wlp c q) c q)
+val wlp_sound : c:com -> q:pred -> Tot (hoare_c (wlp c q) c q)
 let rec wlp_sound c q =
   match c with
   | Skip -> hoare_skip q
   | Assign x e -> hoare_assign q x e
-  | Seq c1 c2 ->
-     (wlp_sound c2 q; wlp_sound c1 (wlp c2 q);
-      hoare_seq (wlp c1 (wlp c2 q)) (wlp c2 q) q c1 c2)
+  | Seq c1 c2 -> 
+      let wlp_c1 = wlp_sound c1 (wlp c2 q) in
+      let wlp_c2 = wlp_sound c2 q in
+      hoare_seq (wlp c1 (wlp c2 q)) c1 (wlp c2 q) c2 q wlp_c1 wlp_c2
+  | If be ct ce -> 
+      let wlp_t = wlp_sound ct q in
+      let wlp_e = wlp_sound ce q in
+      let pt = (pimpl (bpred be) (wlp ct q)) in
+      let pt' = (wlp ct q) in
+      let cons_t = hoare_consequence pt pt' q q ct (hoare)
+      let p = wlp c q in
+      hoare_if p q be ct ce wlp_t wlp_e
   | _ -> admit() (* need more definitions to prove the rest formally *)
+
+
+(*
+
+val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
+                        hoare_c p' c q'        -> 
+                        deduce (pred_impl p p') -> 
+                        deduce (pred_impl q' q) -> 
+                        Tot (hoare_c p c q)
+
+pand (pimpl pg pt) (pimpl (pnot pg) pe)
+
+((pg ==> pt) && (not pg ==> pe))
+
+val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
+                hoare_c (fun h -> FAnd (p h) (bpred be h))  t q ->
+                hoare_c (fun h -> FAnd (p h) (fnot (bpred be h))) e q ->
+                Tot (hoare_c p (If be t e) q)
+
+  (#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> deduce (q h'))*)
 
 (* Informal proofs:
 
@@ -364,5 +387,7 @@ to show:
 *)
 
 assume val wlp_weakest : c:com -> p:pred -> q:pred ->
-  Lemma (requires (hoare p c q)) (ensures (deduce (pred_impl p (wlp c q))))
-  *)
+            hpcq:hoare p c q -> 
+            Tot (deduce (pred_impl p (wlp c q)))
+
+  
