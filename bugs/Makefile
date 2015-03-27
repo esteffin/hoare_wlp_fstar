@@ -23,3 +23,6 @@ bug_5b : exp.fst bug_5b.fst
 
 bug_6 : bug_6.fst
 	$(FSTAR) bug_6.fst
+
+bug_7 : bug_7.fst
+	$(FSTAR) bug_7.fst
