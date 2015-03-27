@@ -35,7 +35,11 @@ type deduce : form -> Type =
              (deduce f1 -> (deduce f2)) -> (* <-- meta level implication *)
              deduce (FImpl f1 f2)
   | DImplElim :
+<<<<<<< HEAD
 	     f1:form ->
+=======
+	           f1:form ->
+>>>>>>> 7e692c093954800870494ea85b4b617c1daaf241
              f2:form ->
              deduce (FImpl f1 f2) ->
              deduce f1 ->
@@ -290,6 +294,7 @@ let rec wlp c q =
   | If be ct ce -> pif (bpred be) (wlp ct q) (wlp ce q)
   | While be c' i -> pand i (pif (bpred be) (wlp c' i) q)
 
+<<<<<<< HEAD
 val proof_if_false_temp : c : pred -> p1 : pred -> p2 : pred -> h : heap -> deduce(FAnd (pif c p1 p2 h) (c h)) -> Tot (deduce (p1 h))
 let proof_if_false_temp c p1 p2 h lhs= 
   	let pc = DAndElim2 lhs in
@@ -304,6 +309,16 @@ let proof_if_true c p1 p2 h =
 
 val plouf : q : pred -> h : heap -> deduce (q h) -> Tot (deduce (q h))
 let plouf q h p = p
+=======
+val proof_if_true : c : pred -> p1 : pred -> p2 : pred -> h : heap -> Tot (deduce(pimpl (pand (pif c p1 p2) c) p1 h))
+let proof_if_true c p1 p2 h = 
+  let f (lhs:deduce (pand (pif c p1 p2) c h)) = 
+  	let pc = DAndElim2 lhs in
+  	let pcp1 = DAndElim1 (DAndElim1 lhs) in
+  	DImplElim ((pand (pif c p1 p2) c) h) (p1 h) pcp1 pc 
+  in DImplIntro f
+
+>>>>>>> 7e692c093954800870494ea85b4b617c1daaf241
 val wlp_sound : c:com -> q:pred -> Tot (hoare_c (wlp c q) c q)
 let rec wlp_sound c q =
   match c with
