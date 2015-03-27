@@ -1,0 +1,5 @@
+../bin/fstar.exe --fstar_home .. ../lib/constr.fst exp.fst hoare_wp.fst
+Stacktrace:
+
+make: *** [hoare_wp] Segmentation fault (core dumped)
+
