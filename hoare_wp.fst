@@ -35,8 +35,8 @@ type deduce : form -> Type =
              (deduce f1 -> Tot (deduce f2)) -> (* <-- meta level implication *)
              deduce (FImpl f1 f2)
   | DImplElim :
-             f1:form ->
-             f2:form ->
+	     #f1:form ->
+             #f2:form ->
              deduce (FImpl f1 f2) ->
              deduce f1 ->
              deduce f2
@@ -265,6 +265,8 @@ let hoare_if p q be t e hthen helse =
           | EIfFalse be cthen celse relse -> helse relse (DAndIntro ph (DNotEq false true))
 
 (* this is weaker than usual and can only show the annotated invariant *)
+
+
 val hoare_while : p:pred -> be:bexp -> c:com -> 
   hoare_c (fun h -> FAnd (p h) (bpred be h)) c p ->
   Tot (hoare_c p (While be c p) (fun h -> FAnd (p h) (fnot (bpred be h))))
@@ -312,6 +314,13 @@ let rec wlp c q =
   | If be ct ce -> pif (bpred be) (wlp ct q) (wlp ce q)
   | While be c' i -> pand i (pif (bpred be) (wlp c' i) q)
 
+val proof_if_true : c : pred -> p1 : pred -> p2 : pred -> h : heap -> deduce( pred_impl (pand (pif c p1 p2) c) p1 h )
+let proof_if_true c p1 p2 h = 
+  let f lhs = 
+  	let pc = DAndElim2 lhs in
+  	let pcp1 = DAndElim1 (DAndElim1 lhs) in
+  	DImplElim pcp1 pc 
+  in DImplIntro f
 val wlp_sound : c:com -> q:pred -> Tot (hoare_c (wlp c q) c q)
 let rec wlp_sound c q =
   match c with
@@ -324,11 +333,11 @@ let rec wlp_sound c q =
   | If be ct ce -> 
       let wlp_t = wlp_sound ct q in
       let wlp_e = wlp_sound ce q in
-      let pt = (pimpl (bpred be) (wlp ct q)) in
-      let pt' = (wlp ct q) in
-      let cons_t = hoare_consequence pt pt' q q ct (hoare)
-      let p = wlp c q in
-      hoare_if p q be ct ce wlp_t wlp_e
+      let vpp' = DForallIntro (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) (proof_if_true (bpred be) (wlp ct q) (wlp ce q)) in 
+      let p = (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) in
+      let p' = wlp ct q in
+      let hthen = hoare_consequence p p' q q ct wlp_t vpp' (DForallIntro (pimpl q q) (fun h -> (DImplIntro (fun pq -> pq)))) in
+      admit()
   | _ -> admit() (* need more definitions to prove the rest formally *)
 
 
