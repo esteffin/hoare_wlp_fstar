@@ -32,11 +32,11 @@ type deduce : form -> Type =
   | DImplIntro :
              #f1:form ->
              #f2:form ->
-             (deduce f1 -> Tot (deduce f2)) -> (* <-- meta level implication *)
+             (deduce f1 -> (deduce f2)) -> (* <-- meta level implication *)
              deduce (FImpl f1 f2)
   | DImplElim :
-	     #f1:form ->
-             #f2:form ->
+	     f1:form ->
+             f2:form ->
              deduce (FImpl f1 f2) ->
              deduce f1 ->
              deduce f2
@@ -279,30 +279,6 @@ let (*rec*) hoare_while p be c hbody =
               //let _ = hoare_while p be c hbody rbody vph1 in
               magic()
           
-(*
-rbody = h cb h'
-rloop = h' (While be cb i) h''
-| EWhileLoop : #h0:heap -> be:bexp{eval_bexp h0 be = true} ->
-               cb:com -> i:pred -> #h1:heap -> #h2:heap ->
-               reval cb h0 h1 ->
-               reval (While be cb i) h1 h2 ->
-               reval (While be cb i) h0 h2
-
-| EWhileEnd  : #h0:heap -> be:bexp{eval_bexp h0 be = false} ->
-               cb:com -> i:pred ->
-               reval (While be cb i) h0 h0
-
-hoare_c (p h && be h) b (p h)
-hoare_c (p h) (While be c p) (p h && not (be h))
-
-
-| DNotEq :
-        #a:Type ->
-        e1:a ->
-        e2:a{e1 <> e2} ->
-        deduce (fnot (FEq e1 e2)) *)
-
-
 (* Weakest Liberal Precondition (aka. predicate transformer semantics) *)
 
 val wlp : com -> pred -> Tot pred
@@ -314,13 +290,20 @@ let rec wlp c q =
   | If be ct ce -> pif (bpred be) (wlp ct q) (wlp ce q)
   | While be c' i -> pand i (pif (bpred be) (wlp c' i) q)
 
-val proof_if_true : c : pred -> p1 : pred -> p2 : pred -> h : heap -> deduce( pred_impl (pand (pif c p1 p2) c) p1 h )
-let proof_if_true c p1 p2 h = 
-  let f lhs = 
+val proof_if_false_temp : c : pred -> p1 : pred -> p2 : pred -> h : heap -> deduce(FAnd (pif c p1 p2 h) (c h)) -> Tot (deduce (p1 h))
+let proof_if_false_temp c p1 p2 h lhs= 
   	let pc = DAndElim2 lhs in
   	let pcp1 = DAndElim1 (DAndElim1 lhs) in
-  	DImplElim pcp1 pc 
-  in DImplIntro f
+  	DImplElim (c h) (p1 h) pcp1 pc 
+
+
+val proof_if_true : c : pred -> p1 : pred -> p2 : pred -> h : heap -> Tot (deduce( FImpl (pand (pif c p1 p2) c h ) (p1 h) ))
+let proof_if_true c p1 p2 h = 
+  DImplIntro (proof_if_false_temp c p1 p2 h)
+
+
+val plouf : q : pred -> h : heap -> deduce (q h) -> Tot (deduce (q h))
+let plouf q h p = p
 val wlp_sound : c:com -> q:pred -> Tot (hoare_c (wlp c q) c q)
 let rec wlp_sound c q =
   match c with
@@ -336,7 +319,7 @@ let rec wlp_sound c q =
       let vpp' = DForallIntro (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) (proof_if_true (bpred be) (wlp ct q) (wlp ce q)) in 
       let p = (pimpl (pand (pif (bpred be) (wlp ct q) (wlp ce q)) (bpred be)) (wlp ct q)) in
       let p' = wlp ct q in
-      let hthen = hoare_consequence p p' q q ct wlp_t vpp' (DForallIntro (pimpl q q) (fun h -> (DImplIntro (fun pq -> pq)))) in
+      let hthen = hoare_consequence p p' q q ct wlp_t vpp' (DForallIntro (pimpl q q) (fun (h:heap) -> (DImplIntro (plouf q h)))) in
       admit()
   | _ -> admit() (* need more definitions to prove the rest formally *)
 
