@@ -20,3 +20,6 @@ bug_5 : exp.fst bug_5.fst
 
 bug_5b : exp.fst bug_5b.fst
 	$(FSTAR) $(FSTAR_HOME)/lib/constr.fst exp.fst bug_5b.fst
+
+bug_6 : bug_6.fst
+	$(FSTAR) bug_6.fst
