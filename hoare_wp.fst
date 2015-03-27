@@ -35,8 +35,8 @@ type deduce : form -> Type =
              (deduce f1 -> Tot (deduce f2)) -> (* <-- meta level implication *)
              deduce (FImpl f1 f2)
   | DImplElim :
-             #f1:form ->
-             #f2:form ->
+             f1:form ->
+             f2:form ->
              deduce (FImpl f1 f2) ->
              deduce f1 ->
              deduce f2
@@ -239,20 +239,19 @@ val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
                         Tot (hoare_c p c q)
 let hoare_consequence p p' q q' c hpcq' vpp' vqq' = 
     fun h h' pr (vph:deduce (p h)) -> 
-        let vpp' = DForallElim (pimpl p p') vpp' h in
-        admit()
+        let vpp'  = DForallElim (pimpl p p') vpp' h in // deduce ((pimpl p p') h)
+        let vpph  = DImplElim (p h) (p' h) vpp' vph in
+        let vqqh' = hpcq' pr vpph in
+        let vqq'  = DForallElim (pimpl q' q) vqq' h' in // deduce ((pimpl q q') h')
+        let vqqh' = DImplElim (q' h') (q h') vqq' vqqh' in //deduce (q h')
+        vqqh'
         
 (*
-  | DForallElim :
-      #a:Type ->
-      f:(a->Tot form) ->
-      deduce (FForall f) ->
-      x:a ->
-      deduce (f x)
+(#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> deduce (q h'))
 
   | DImplElim :
-      #f1:form ->
-      #f2:form ->
+      f1:form ->
+      f2:form ->
       deduce (FImpl f1 f2) ->
       deduce f1 ->
       deduce f2
