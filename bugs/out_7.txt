@@ -1,0 +1,2 @@
+Unexpected error; please file a bug report, ideally with a minimized version of the source program that triggered the error.
+Not enough arguments to format string occurs-check failed (%s occurs in {%s} uvars of %s normalized to %s) : expected 5 got ['e9633, 'e9633, ('e9633 c q be ct ce wlp_t wlp_e vpp' p p' h)] frags are [occurs-check failed (,  occurs in {, } uvars of ,  normalized to , )]
