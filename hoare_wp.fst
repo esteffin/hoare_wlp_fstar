@@ -198,7 +198,7 @@ type hoare (p:pred) (c:com) (q:pred) : Type =
 
 (* hoare constructive *)
 type hoare_c (p:pred) (c:com) (q:pred) : Type =
-  (#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> deduce (q h'))
+  (#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> Tot(deduce (q h')))
 
 val pred_sub : id -> aexp -> pred -> Tot pred
 let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
@@ -270,13 +270,13 @@ let hoare_if p q be t e hthen helse =
 val hoare_while : p:pred -> be:bexp -> c:com -> 
   hoare_c (pand p (bpred be)) c p ->
   Tot (hoare_c p (While be c p) (pand p (pnot (bpred be))))
-let (*rec*) hoare_while p be c hbody = 
+let (*rec*) hoare_while p be c hbody = (*TODO: Fix the bug which appears with the rec*)
     fun h h' pr (ph:deduce (p h)) -> 
         match pr with
           | EWhileEnd  be cb i -> (DAndIntro ph (DNotEq false true))
           | EWhileLoop be cb i rbody rloop -> 
               let vph1 = hbody rbody (DAndIntro ph (DEqRefl true)) in
-              //let _ = hoare_while p be c hbody rbody vph1
+              (*hoare_while p be c hbody rbody vph1*)
               magic()
           
 (* Weakest Liberal Precondition (aka. predicate transformer semantics) *)
@@ -357,7 +357,7 @@ let while6 be c i q vprop h =
 DImplIntro (pand i (pnot (bpred be)) h ) (q h) (while5 be c i q vprop h)
 
 
-val whilecase : be : bexp -> c : com -> i : pred -> q : pred -> deduce (FForall (pimpl i (pif (bpred be) (wlp c i) q))) -> h : heap -> h' : heap -> hwlpi : hoare_c (wlp c i) c i -> hoare_c (wlp (While be c i) q) (While be c i) q
+val whilecase : be : bexp -> c : com -> i : pred -> q : pred -> deduce (FForall (pimpl i (pif (bpred be) (wlp c i) q))) -> h : heap -> h' : heap -> hwlpi : hoare_c (wlp c i) c i -> Tot(hoare_c (wlp (While be c i) q) (While be c i) q)
 let whilecase be c i q vforall h h' hwlpi =
 (*forall. i /\ b ==> wlp c i *)
 let v1 = DForallIntro (pimpl (pand i (bpred be)) (wlp c i)) (while2 be c i q vforall) in
@@ -447,8 +447,15 @@ to show:
 
 *)
 
-assume val wlp_weakest : c:com -> p:pred -> q:pred ->
-            hpcq:hoare p c q -> 
-            Tot (deduce (pred_impl p (wlp c q)))
+(*weakest property : it is false for now, but it should be true without While.
+for now, I do not know how to change this definition in order to make it works …*)
 
-  
+val skip : p : pred ->  q : pred -> hpcq : hoare_c p Skip q -> h : heap -> deduce (p h) -> Tot (deduce (q h))
+let skip p q hpcq h ph = hpcq (ESkip h) ph
+val wlp_weakest : c:com -> p:pred -> q:pred ->
+            hpcq:hoare_c p c q -> 
+            deduce (pred_impl p (wlp c q))
+
+let wlp_weakest c p q hpcq = match c with
+| Skip -> DForallIntro (pimpl p (wlp Skip q)) (fun h -> DImplIntro (p h) (wlp Skip q h) (skip p q hpcq h))
+| _ -> admit ()
