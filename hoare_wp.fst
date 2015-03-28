@@ -8,7 +8,6 @@ type form =
 | FAnd    : form -> form -> form
 | FForall : (heap -> Tot form) -> form
 | FEq     : #a:Type -> a -> a -> form
-(*| FBexp   : bexp -> heap -> form*)
 
 val fnot : form -> Tot form
 let fnot f = FImpl f FFalse
@@ -17,12 +16,7 @@ val ftrue : form
 let ftrue = FEq () ()
 
 val ffor : form -> form -> Tot form
-(*
-let ffor f1 f2 = fnot (FAnd (fnot f1) (fnot f2))
-(f1 => false) /\ (f2 => false) ==> false
-*)
 let ffor f1 f2 = FImpl (fnot f1) f2
-(* (f1 => false) => f2 *)
 
 type deduce : form -> Type =
   | DFalseElim :
@@ -35,7 +29,7 @@ type deduce : form -> Type =
              (deduce f1 -> Tot (deduce f2)) -> (* <-- meta level implication *)
              deduce (FImpl f1 f2)
   | DImplElim :
-	           f1:form ->
+	     f1:form ->
              f2:form ->
              deduce (FImpl f1 f2) ->
              deduce f1 ->
@@ -112,6 +106,17 @@ type deduce : form -> Type =
 (* Predicates (aka. assertions) *)
 type pred = heap -> Tot form
 
+val pand : pred -> pred -> Tot pred
+let pand p1 p2 h = FAnd (p1 h) (p2 h)
+
+val pimpl : pred -> pred -> Tot pred
+let pimpl p1 p2 h = FImpl (p1 h) (p2 h)
+
+val pnot : pred -> Tot pred
+let pnot p h = fnot (p h)
+
+val pif : pred -> pred -> pred -> Tot pred
+let pif pg pt pe = pand (pimpl pg pt) (pimpl (pnot pg) pe)
 
 (* Commands (aka. statements) -- while has loop invariant *)
 type com = 
@@ -192,41 +197,24 @@ let rec eval c h0 =
 
 (* Hoare logic *)
 
-(* Hoare triples - partial correctness (no termination) *)
+(* Hoare triples -- constructive style; partial correctness (no termination) *)
 type hoare (p:pred) (c:com) (q:pred) : Type =
-  (forall h h'. reval c h h' ==> deduce (p h) ==> deduce (q h'))
-
-(* hoare constructive *)
-type hoare_c (p:pred) (c:com) (q:pred) : Type =
   (#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> Tot(deduce (q h')))
 
 val pred_sub : id -> aexp -> pred -> Tot pred
 let pred_sub x e p = fun h -> p (update h x (eval_aexp h e))
 
-val hoare_assign : q:pred -> x:id -> e:aexp -> Tot (hoare_c (pred_sub x e q) (Assign x e) q)
+val hoare_assign : q:pred -> x:id -> e:aexp -> Tot (hoare (pred_sub x e q) (Assign x e) q)
 let hoare_assign q x e = fun h h' pr (vh:deduce (pred_sub x e q h)) -> vh
-
-val pand : pred -> pred -> Tot pred
-let pand p1 p2 h = FAnd (p1 h) (p2 h)
-
-val pimpl : pred -> pred -> Tot pred
-let pimpl p1 p2 h = FImpl (p1 h) (p2 h)
-
-val pnot : pred -> Tot pred
-let pnot p h = fnot (p h)
-
-val pif : pred -> pred -> pred -> Tot pred
-let pif pg pt pe = pand (pimpl pg pt) (pimpl (pnot pg) pe)
 
 val pred_impl : pred -> pred -> Tot form
 let pred_impl p q = FForall (pimpl p q)
 
-
 val hoare_consequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
-                        hoare_c p' c q'        -> 
+                        hoare p' c q'        -> 
                         deduce (pred_impl p p') -> 
                         deduce (pred_impl q' q) -> 
-                        Tot (hoare_c p c q)
+                        Tot (hoare p c q)
 let hoare_consequence p p' q q' c hpcq' vpp' vqq' = 
     fun h h' pr (vph:deduce (p h)) -> 
         let vpp'  = DForallElim (pimpl p p') vpp' h in // deduce ((pimpl p p') h)
@@ -236,14 +224,14 @@ let hoare_consequence p p' q q' c hpcq' vpp' vqq' =
         let vqqh' = DImplElim (q' h') (q h') vqq' vqqh' in //deduce (q h')
         vqqh'
 
-val hoare_skip : p:pred -> Tot (hoare_c p Skip p)
+val hoare_skip : p:pred -> Tot (hoare p Skip p)
 let hoare_skip p = fun h h' pr vph -> vph 
 
 
 val hoare_seq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred -> 
-        hpq : hoare_c p c1 q  -> 
-        hqr:hoare_c q c2 r    ->
-        Tot (hoare_c p (Seq c1 c2) r)
+        hpq : hoare p c1 q  -> 
+        hqr:hoare q c2 r    ->
+        Tot (hoare p (Seq c1 c2) r)
 let hoare_seq p c1 q c2 r hpq hqr = 
     fun h1 h3 pr vph1 ->
         let ESeq r12 r23 = pr in 
@@ -255,9 +243,9 @@ let bpred be h = FEq bool (eval_bexp h be) true
 
 
 val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
-                hoare_c (pand p (bpred be))  t q ->
-                hoare_c (pand p (pnot (bpred be))) e q ->
-                Tot (hoare_c p (If be t e) q)
+                hoare (pand p (bpred be))  t q ->
+                hoare (pand p (pnot (bpred be))) e q ->
+                Tot (hoare p (If be t e) q)
 let hoare_if p q be t e hthen helse = 
     fun h h' pr (ph:deduce (p h)) -> (*ph -> *)
         match pr with
@@ -268,8 +256,8 @@ let hoare_if p q be t e hthen helse =
 
 
 val hoare_while : p:pred -> be:bexp -> c:com -> 
-  hoare_c (pand p (bpred be)) c p ->
-  Tot (hoare_c p (While be c p) (pand p (pnot (bpred be))))
+  hoare (pand p (bpred be)) c p ->
+  Tot (hoare p (While be c p) (pand p (pnot (bpred be))))
 let (*rec*) hoare_while p be c hbody = (*TODO: Fix the bug which appears with the rec*)
     fun h h' pr (ph:deduce (p h)) -> 
         match pr with
@@ -357,7 +345,7 @@ let while6 be c i q vprop h =
 DImplIntro (pand i (pnot (bpred be)) h ) (q h) (while5 be c i q vprop h)
 
 
-val whilecase : be : bexp -> c : com -> i : pred -> q : pred -> deduce (FForall (pimpl i (pif (bpred be) (wlp c i) q))) -> h : heap -> h' : heap -> hwlpi : hoare_c (wlp c i) c i -> Tot(hoare_c (wlp (While be c i) q) (While be c i) q)
+val whilecase : be : bexp -> c : com -> i : pred -> q : pred -> deduce (FForall (pimpl i (pif (bpred be) (wlp c i) q))) -> h : heap -> h' : heap -> hwlpi : hoare (wlp c i) c i -> Tot(hoare (wlp (While be c i) q) (While be c i) q)
 let whilecase be c i q vforall h h' hwlpi =
 (*forall. i /\ b ==> wlp c i *)
 let v1 = DForallIntro (pimpl (pand i (bpred be)) (wlp c i)) (while2 be c i q vforall) in
@@ -373,7 +361,7 @@ let v3 = DForallIntro (pimpl (wlp (While be c i) q) i) (while4 be c i q vforall)
 let v4 = DForallIntro (pimpl (pand i (pnot (bpred be))) q) (while6 be c i q vforall) in
 hoare_consequence (wlp (While be c i) q) i q (pand i (pnot (bpred be))) (While be c i) hiwhileinbe v3 v4
 
-val wlp_sound : c:com -> q:pred -> Tot (hoare_c (wlp c q) c q)
+val wlp_sound : c:com -> q:pred -> Tot (hoare (wlp c q) c q)
 let rec wlp_sound c q =
   match c with
   | Skip -> hoare_skip q
@@ -406,9 +394,9 @@ let rec wlp_sound c q =
 
 (*
 val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
-                hoare_c (fun h -> FAnd (p h) (bpred be h))  t q ->
-                hoare_c (fun h -> FAnd (p h) (fnot (bpred be h))) e q ->
-                Tot (hoare_c p (If be t e) q)
+                hoare (fun h -> FAnd (p h) (bpred be h))  t q ->
+                hoare (fun h -> FAnd (p h) (fnot (bpred be h))) e q ->
+                Tot (hoare p (If be t e) q)
 
   (#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> deduce (q h'))*)
 
@@ -450,10 +438,10 @@ to show:
 (*weakest property : it is false for now, but it should be true without While.
 for now, I do not know how to change this definition in order to make it works …*)
 
-val skip : p : pred ->  q : pred -> hpcq : hoare_c p Skip q -> h : heap -> deduce (p h) -> Tot (deduce (q h))
+val skip : p : pred ->  q : pred -> hpcq : hoare p Skip q -> h : heap -> deduce (p h) -> Tot (deduce (q h))
 let skip p q hpcq h ph = hpcq (ESkip h) ph
 val wlp_weakest : c:com -> p:pred -> q:pred ->
-            hpcq:hoare_c p c q -> 
+            hpcq:hoare p c q -> 
             deduce (pred_impl p (wlp c q))
 
 let wlp_weakest c p q hpcq = match c with
