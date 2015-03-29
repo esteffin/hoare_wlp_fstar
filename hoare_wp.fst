@@ -41,8 +41,8 @@ type deduce : form -> Type =
              deduce f1 ->
              deduce f2
   | DAndIntro :
-             #f1:form ->
-             #f2:form ->
+             f1:form ->
+             f2:form ->
              deduce f1 ->
              deduce f2 ->
              deduce (FAnd f1 f2)
@@ -188,6 +188,25 @@ let rec eval c h0 =
           (|h2, EWhileLoop be cb i p1 p2|)
      else (|h0, EWhileEnd be cb i|)
 
+val eval_tot : c:com -> h0:heap -> Tot (|h1:heap * reval c h0 h1|)
+let rec eval_tot c h0 =
+  match c with
+  | Skip ->
+     (|h0, ESkip h0|)
+  | Assign x e ->
+     (|update h0 x (eval_aexp h0 e), EAssign h0 x e|)
+  | Seq c1 c2 ->
+     let (|h1, p1|) = eval_tot c1 h0 in
+     let (|h2, p2|) = eval_tot c2 h1 in
+     (|h2, ESeq p1 p2|)
+  | If be ct ce ->
+     if eval_bexp h0 be then
+       let (|h1, p1|) = eval_tot ct h0 in
+       (|h1, EIfTrue be ct ce p1|)
+     else
+       let (|h1, p1|) = eval_tot ce h0 in
+       (|h1, EIfFalse be ct ce p1|)
+  | While be cb i -> magic()
 
 
 (* Hoare logic *)
@@ -261,8 +280,8 @@ val hoare_if : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
 let hoare_if p q be t e hthen helse = 
     fun h h' pr (ph:deduce (p h)) -> (*ph -> *)
         match pr with
-          | EIfTrue be cthen celse rthen  -> hthen rthen (DAndIntro ph (DEqRefl true))
-          | EIfFalse be cthen celse relse -> helse relse (DAndIntro ph (DNotEq false true))
+          | EIfTrue be cthen celse rthen  -> hthen rthen (DAndIntro (p h) (FEq true true) ph (DEqRefl true))
+          | EIfFalse be cthen celse relse -> helse relse (DAndIntro (p h) (fnot (FEq false true)) ph (DNotEq false true))
 
 (* this is weaker than usual and can only show the annotated invariant *)
 
@@ -273,9 +292,9 @@ val hoare_while : p:pred -> be:bexp -> c:com ->
 let (*rec*) hoare_while p be c hbody = (*TODO: Fix the bug which appears with the rec*)
     fun h h' pr (ph:deduce (p h)) -> 
         match pr with
-          | EWhileEnd  be cb i -> (DAndIntro ph (DNotEq false true))
+          | EWhileEnd  be cb i -> (DAndIntro (p h) (fnot (FEq false true)) ph (DNotEq false true))
           | EWhileLoop be cb i rbody rloop -> 
-              let vph1 = hbody rbody (DAndIntro ph (DEqRefl true)) in
+              let vph1 = hbody rbody (DAndIntro (p h) (FEq true true) ph (DEqRefl true)) in
               (*hoare_while p be c hbody rbody vph1*)
               magic()
           
@@ -452,10 +471,85 @@ for now, I do not know how to change this definition in order to make it works �
 
 val skip : p : pred ->  q : pred -> hpcq : hoare_c p Skip q -> h : heap -> deduce (p h) -> Tot (deduce (q h))
 let skip p q hpcq h ph = hpcq (ESkip h) ph
+
+val assign1 : x : nat -> e : aexp -> p:pred -> q:pred -> hpcq : hoare_c p (Assign x e) q -> h : heap -> vph : deduce (p h) ->Tot( deduce(wlp (Assign x e) q h))
+
+let assign1  x e p q hpcq h vph =
+let h' = update h x (eval_aexp h e) in
+let pr = EAssign h x e in
+let vqh' = hpcq pr vph in
+vqh' 
+
+val assign2 : x : nat -> e : aexp -> p:pred -> q:pred -> hpcq : hoare_c p (Assign x e) q -> h : heap -> Tot(deduce (FImpl (p h) (wlp (Assign x e) q h)))
+let assign2 x e p q hpcq h =
+DImplIntro (p h) (wlp (Assign x e) q h) (assign1 x e p q hpcq h)
+(*Idea of proof for the seq case, which do not typecheck.
+Anyway, there is a comparaison between two heaps, which
+is not computable …*)
+(*
+val seq1 : c1:com -> c2:com -> p : pred -> q:pred -> hpc1c2q :hoare_c p (Seq c1 c2) q -> h0 : heap -> vph0 : deduce (p h0) -> h1 : heap -> pr1 : reval c1 h0 h1 -> Tot(hoare_c (fun x -> FEq h1 x) c2 q)
+let seq1 c1 c2 p q hpc1c2q h0 vph0 h1 pr1 =  
+fun h1' h2 pr2 veq -> if h1 = h1' then hpc1c2q (ESeq pr1 pr2) vph0 
+else let vfalse = DImplElim (FEq h1 h1') FFalse (DNotEq h1 h1') veq in
+DFalseElim (q h2) vfalse
+*)
+val iftrue : be:bexp -> ct:com -> ce:com -> p : pred -> q:pred -> hpifq :hoare_c p (If be ct ce) q -> Tot(hoare_c (pand p (bpred be)) ct q)
+let iftrue be ct ce p q hpifq = fun h h' pr vpbeh ->
+if eval_bexp h be then
+hpifq (EIfTrue be ct ce pr) (DAndElim1 (p h) (bpred be h) vpbeh)
+else
+let vbe = DAndElim2 (p h) (bpred be h) vpbeh in
+let vnbe = DNotEq false true in
+let vfalse = DImplElim (bpred be h) FFalse vnbe vbe in
+DFalseElim (q h') vfalse
+val iffalse : be:bexp -> ct:com -> ce:com -> p : pred -> q:pred -> hpifq :hoare_c p (If be ct ce) q -> Tot(hoare_c (pand p (pnot (bpred be))) ce q)
+let iffalse be ct ce p q hpifq = fun h h' pr vpnbeh ->
+if eval_bexp h be = false then
+hpifq (EIfFalse be ct ce pr) (DAndElim1 (p h) (pnot (bpred be) h) vpnbeh)
+else
+let vnbe = DAndElim2 (p h) (pnot (bpred be) h) vpnbeh in
+let vbe = DEqRefl true in
+let vfalse = DImplElim (bpred be h) FFalse vnbe vbe in
+DFalseElim (q h') vfalse
+
+val if5 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred -> vimpltrue : deduce(FForall(pimpl (pand p (bpred be)) (wlp ct q))) -> vimplfalse : deduce(FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) -> h : heap -> vph : deduce(p h) -> vnbe : deduce (pnot (bpred be) h) -> Tot(deduce(wlp ce q h))
+let if5 be ct ce p q vimpltrue vimplfalse h vph vnbe =
+let vimplfalseh = DForallElim (pimpl (pand p (pnot (bpred be))) (wlp ce q)) vimplfalse h in
+let vand = DAndIntro (p h) (pnot (bpred be) h) vph vnbe in
+DImplElim (pand p (pnot (bpred be)) h) (wlp ce q h) vimplfalseh vand
+
+val if4 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred -> vimpltrue : deduce(FForall(pimpl (pand p (bpred be)) (wlp ct q))) -> vimplfalse : deduce(FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) -> h : heap -> vph : deduce(p h) -> vbe : deduce (bpred be h) -> Tot(deduce((wlp ct q) h))
+let if4 be ct ce p q vimpltrue vimplfalse h vph vbe =
+let vimpltrueh = DForallElim (pimpl (pand p (bpred be)) (wlp ct q)) vimpltrue h in
+let vand = DAndIntro (p h) (bpred be h) vph vbe in
+DImplElim (pand p (bpred be) h) (wlp ct q h) vimpltrueh vand
+
+val if3 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred -> vimpltrue : deduce(FForall(pimpl (pand p (bpred be)) (wlp ct q))) -> vimplfalse : deduce(FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) -> h : heap -> vph : deduce(p h) -> Tot(deduce((pif (bpred be) (wlp ct q) (wlp ce q)) h))
+let if3 be ct ce p q vimpltrue vimplfalse h vph =
+DAndIntro (pimpl (bpred be) (wlp ct q) h ) (pimpl (pnot (bpred be)) (wlp ce q) h) (DImplIntro (bpred be h) (wlp ct q h) (if4 be ct ce p q vimpltrue vimplfalse h vph)) (DImplIntro (pnot (bpred be) h) (wlp ce q h) (if5 be ct ce p q vimpltrue vimplfalse h vph))
+
+val if2 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred -> vimpltrue : deduce(FForall(pimpl (pand p (bpred be)) (wlp ct q))) -> vimplfalse : deduce(FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) -> h : heap -> Tot(deduce((pimpl p (pif (bpred be) (wlp ct q) (wlp ce q))) h))
+let if2 be ct ce p q vimpltrue vimplfalse h =
+DImplIntro (p h) (pif (bpred be) (wlp ct q) (wlp ce q) h) (if3 be ct ce p q vimpltrue vimplfalse h)
+val if1 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred -> vimpltrue : deduce(FForall(pimpl (pand p (bpred be)) (wlp ct q))) -> vimplfalse : deduce(FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) -> Tot(deduce(FForall(pimpl p (pif (bpred be) (wlp ct q) (wlp ce q)))))
+let if1 be ct ce p q vimpltrue vimplfalse =
+DForallIntro (pimpl p (pif (bpred be) (wlp ct q) (wlp ce q))) (if2 be ct ce p q vimpltrue vimplfalse)
+
+
 val wlp_weakest : c:com -> p:pred -> q:pred ->
             hpcq:hoare_c p c q -> 
             deduce (pred_impl p (wlp c q))
 
-let wlp_weakest c p q hpcq = match c with
+let rec wlp_weakest c p q hpcq = match c with
 | Skip -> DForallIntro (pimpl p (wlp Skip q)) (fun h -> DImplIntro (p h) (wlp Skip q h) (skip p q hpcq h))
-| _ -> admit ()
+| Assign x e -> DForallIntro (pimpl p (wlp (Assign x e) q)) (assign2 x e p q hpcq)
+(*The rule for Seq should be true. But my idea to 
+prove it can not be written in FStar … *)
+| Seq c1 c2 -> magic ()
+| If be ct ce -> let hoaretrue = iftrue be ct ce p q hpcq in
+let vimpltrue = wlp_weakest ct (pand p (bpred be)) q hoaretrue in
+let hoarefalse = iffalse be ct ce p q hpcq in
+let vimplfalse = wlp_weakest ce (pand p (pnot (bpred be))) q hoarefalse in
+if1 be ct ce p q vimpltrue vimplfalse
+(*It is anyway false for While*)
+| While be body i -> magic ()
