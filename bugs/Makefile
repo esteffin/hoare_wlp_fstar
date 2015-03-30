@@ -26,3 +26,7 @@ bug_6 : bug_6.fst
 
 bug_7 : bug_7.fst
 	$(FSTAR) bug_7.fst
+
+# CH: This gave Enrico a segmentation fault; I cannot reproduce it though
+bug_8 : bug_8.fst
+	$(FSTAR) bug_8.fst
