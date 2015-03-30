@@ -218,7 +218,8 @@ let rec eval_tot c h0 =
 
 (* Hoare logic *)
 
-(* Hoare triples -- constructive style; partial correctness (no termination) *)
+(* Hoare triples -- semantic; constructive style;
+                    partial correctness (no termination) *)
 type hoare (p:pred) (c:com) (q:pred) : Type =
   (#h:heap -> #h':heap -> reval c h h' -> deduce (p h) -> Tot (deduce (q h')))
 
@@ -565,8 +566,8 @@ let iffalse be ct ce p q hpifq =
             DFalseElim (q h') vfalse
 
 opaque val if5 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred ->
-     vimpltrue:deduce (FForall(pimpl (pand p (bpred be)) (wlp ct q))) ->
-     vimplfalse:deduce (FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
+     vimpltrue:deduce (FForall (pimpl (pand p (bpred be)) (wlp ct q))) ->
+     vimplfalse:deduce (FForall (pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
      h:heap ->
      vph:deduce (p h) ->
      vnbe:deduce (pnot (bpred be) h) ->
@@ -578,8 +579,8 @@ let if5 be ct ce p q vimpltrue vimplfalse h vph vnbe =
     DImplElim (pand p (pnot (bpred be)) h) (wlp ce q h) vimplfalseh vand
 
 opaque val if4 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred ->
-     vimpltrue:deduce (FForall(pimpl (pand p (bpred be)) (wlp ct q))) ->
-     vimplfalse:deduce (FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
+     vimpltrue:deduce (FForall (pimpl (pand p (bpred be)) (wlp ct q))) ->
+     vimplfalse:deduce (FForall (pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
      h:heap ->
      vph:deduce (p h) ->
      vbe:deduce (bpred be h) ->
@@ -591,8 +592,8 @@ let if4 be ct ce p q vimpltrue vimplfalse h vph vbe =
     DImplElim (pand p (bpred be) h) (wlp ct q h) vimpltrueh vand
 
 opaque val if3 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred ->
-    vimpltrue : deduce (FForall(pimpl (pand p (bpred be)) (wlp ct q))) ->
-    vimplfalse : deduce (FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
+    vimpltrue : deduce (FForall (pimpl (pand p (bpred be)) (wlp ct q))) ->
+    vimplfalse : deduce (FForall (pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
     h : heap ->
     vph : deduce (p h) ->
     Tot (deduce ((pif (bpred be) (wlp ct q) (wlp ce q)) h))
@@ -605,8 +606,8 @@ let if3 be ct ce p q vimpltrue vimplfalse h vph =
                         (if5 be ct ce p q vimpltrue vimplfalse h vph))
 
 opaque val if2 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred ->
-    vimpltrue : deduce (FForall(pimpl (pand p (bpred be)) (wlp ct q))) ->
-    vimplfalse : deduce (FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
+    vimpltrue : deduce (FForall (pimpl (pand p (bpred be)) (wlp ct q))) ->
+    vimplfalse : deduce (FForall (pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
     h : heap ->
     Tot(deduce ((pimpl p (pif (bpred be) (wlp ct q) (wlp ce q))) h))
 let if2 be ct ce p q vimpltrue vimplfalse h =
@@ -614,12 +615,36 @@ let if2 be ct ce p q vimpltrue vimplfalse h =
                (if3 be ct ce p q vimpltrue vimplfalse h)
 
 opaque val if1 : be :bexp -> ct : com -> ce:com -> p : pred -> q : pred ->
-    vimpltrue : deduce (FForall(pimpl (pand p (bpred be)) (wlp ct q))) ->
-    vimplfalse : deduce (FForall(pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
-    Tot (deduce (FForall(pimpl p (pif (bpred be) (wlp ct q) (wlp ce q)))))
+    vimpltrue : deduce (FForall (pimpl (pand p (bpred be)) (wlp ct q))) ->
+    vimplfalse : deduce (FForall (pimpl (pand p (pnot (bpred be))) (wlp ce q))) ->
+    Tot (deduce (FForall (pimpl p (pif (bpred be) (wlp ct q) (wlp ce q)))))
 let if1 be ct ce p q vimpltrue vimplfalse =
     DForallIntro (pimpl p (pif (bpred be) (wlp ct q) (wlp ce q)))
                  (if2 be ct ce p q vimpltrue vimplfalse)
+
+(* Syntactic Hoare triples (needed for wlp_weakest) *)
+
+type hoare_syn : pred -> com -> pred -> Type =
+  | HoareSynAssign : q:pred -> x:id -> e:aexp ->
+                     Tot (hoare_syn (pred_sub x e q) (Assign x e) q)
+  | HoareSynConsequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
+                          hoare_syn p' c q' ->
+                          deduce (pred_impl p p') ->
+                          deduce (pred_impl q' q) ->
+                          Tot (hoare_syn p c q)
+  | HoareSynSkip : p:pred ->
+                   Tot (hoare_syn p Skip p)
+  | HoareSynSeq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred ->
+                  hoare_syn p c1 q  ->
+                  hoare_syn q c2 r    ->
+                  Tot (hoare_syn p (Seq c1 c2) r)
+  | HoareIf : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
+              hoare_syn (pand p (bpred be))  t q ->
+              hoare_syn (pand p (pnot (bpred be))) e q ->
+              Tot (hoare_syn p (If be t e) q)
+  | HoareWhile : p:pred -> be:bexp -> c:com ->
+                 hoare_syn (pand p (bpred be)) c p ->
+                 Tot (hoare_syn p (While be c p) (pand p (pnot (bpred be))))
 
 opaque val wlp_weakest : c:com -> p:pred -> q:pred ->
                          hpcq:hoare p c q ->
