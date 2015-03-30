@@ -1,5 +1,6 @@
 module WeakestPrecondition
 open Expressions
+open Classical
 
 (* Higher-order abstract syntax (HOAS) representation of formulas *)
 type form =
@@ -527,13 +528,14 @@ let assign2 x e p q hpcq h =
 Anyway, there is a comparaison between two heaps, which
 is not computable …*)
 (*
+type heap_equal (h1:heap) (h2:heap) = (h1=h2)
 val seq1 : c1:com -> c2:com -> p : pred -> q:pred ->
            hpc1c2q :hoare p (Seq c1 c2) q ->
            h0 : heap -> vph0 : deduce (p h0) -> h1 : heap ->
            pr1 : reval c1 h0 h1 -> Tot(hoare (fun x -> FEq h1 x) c2 q)
 let seq1 c1 c2 p q hpc1c2q h0 vph0 h1 pr1 =
     fun h1' h2 pr2 veq ->
-        if h1 = h1' then
+        if excluded_middle (heap_equal h1 h1') then
             hpc1c2q (ESeq pr1 pr2) vph0
         else
             let vfalse = DImplElim (FEq h1 h1') FFalse (DNotEq h1 h1') veq in
@@ -668,16 +670,76 @@ type hoare_syn : pred -> com -> pred -> Type =
   | HoareSynWhile : p:pred -> be:bexp -> c:com ->
                     hoare_syn (pand p (bpred be)) c p ->
                     Tot (hoare_syn p (While be c p) (pand p (pnot (bpred be))))
+(* (q'=>q) => (wlp c q' => wlp c q) *)
+assume val impl_wlp : c:com -> q:pred -> q':pred -> deduce(pred_impl q' q) -> Tot(deduce(pred_impl (wlp c q') (wlp c q)))
 
 (* CH: here is a version of wlp_weakest that has some chance of holding *)
+(* (p1 => p2) -> (p2 => p3) -> (p1 => p3)*)
+assume val impl_comp : p1 : pred -> p2 : pred -> p3 : pred -> deduce(pred_impl p1 p2) -> deduce (pred_impl p2 p3) -> Tot(deduce (pred_impl p1 p3))
+
+(*p,be |- wlp body p*)
+val while1' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap -> deduce (p h) -> deduce (bpred be h) -> Tot(deduce (wlp body p h))
+let while1' be body p vpbewlp h vph vbe =
+let vpbewlph = DForallElim (pimpl (pand p (bpred be)) (wlp body p)) vpbewlp h in
+let vand = DAndIntro (p h) (bpred be h) vph vbe in
+DImplElim (pand p (bpred be) h) (wlp body p h) vpbewlph vand
+val while2' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap -> deduce (p h) -> Tot(deduce (FImpl (bpred be h) (wlp body p h)))
+let while2' be body p vpbewlp h vph =
+DImplIntro (bpred be h) (wlp body p h) (while1' be body p vpbewlp h vph)
+
+val while3' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap -> deduce (p h) -> deduce (pnot (bpred be) h) -> Tot(deduce (FAnd (p h) (pnot (bpred be) h) ))
+let while3' be body p vpbewlp h vph vnbe =
+DAndIntro (p h) (pnot (bpred be) h) vph vnbe
+
+val while4' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap -> deduce (p h) -> Tot(deduce (FImpl (pnot (bpred be) h) (pand p (pnot (bpred be)) h)))
+let while4' be body p vpbewlp h vph =
+DImplIntro (pnot (bpred be) h) (pand p (pnot (bpred be)) h) (while3' be body p vpbewlp h vph)
+
+(*
+val while5' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap -> deduce (p h) -> Tot(deduce (FAnd (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) h)))
+
+let while5' be body p vpbewlp h vph vbe iaun =
+DAndIntro (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) h) (while2' be body p vpbewlp h vph) (while4' be body p vpbewlp h vph)
+
+*)
+val while6' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap -> Tot(deduce (FImpl (p h) (FAnd (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) h))))
+let while6' be body p vpbewlp h =
+DImplIntro (p h) (FAnd (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) h)) (fun vph -> 
+DAndIntro (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) h) (while2' be body p vpbewlp h vph) (while4' be body p vpbewlp h vph))
+val while7' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap -> deduce (p h) -> Tot(deduce (FAnd (p h) (pred_impl (p) (pand (pimpl (bpred be) (wlp body p) ) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) )))))
+let while7' be body p vpbewlp h vph =
+DAndIntro (p h) (pred_impl (p) (pand (pimpl (bpred be) (wlp body p) ) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) ))) vph (DForallIntro (pimpl p (pand (pimpl (bpred be) (wlp body p) ) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) ))) (while6' be body p vpbewlp))
+val while8' : be : bexp -> body : com -> p : pred -> deduce (pred_impl (pand p (bpred be)) (wlp body p)) -> h : heap ->  
+Tot(deduce (FImpl (p h) (FAnd (p h) (pred_impl (p) (pand (pimpl (bpred be) (wlp body p) ) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) ))))))
+let while8' be body p vpbewlp h =
+DImplIntro (p h) (pand p (fun _ -> pred_impl (p) (pand (pimpl (bpred be) (wlp body p) ) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) ))) h) (while7' be body p vpbewlp h)
+
+
 opaque val wlp_weakest' : c:com -> p:pred -> q:pred ->
                          hpcq:hoare_syn p c q ->
                          Tot (deduce (pred_impl p (wlp c q))) (decreases hpcq)
 let rec wlp_weakest' c p q hpcq =
   match hpcq with
-  | HoareSynAssign q' x e -> magic()
-  | HoareSynConsequence p' p'' q' q'' c' hc hpp' hq'q -> magic()
-  | HoareSynSkip p' -> magic()
-  | HoareSynSeq p' c1 q' c2  r' hc1 hc2 -> magic()
-  | HoareSynIf p' q' be ct ce hct hce -> magic()
-  | HoareSynWhile i be body hbody -> magic()
+(*p = pred_sub x e q*)
+  | HoareSynAssign q' x e -> DForallIntro (pimpl p p) (fun h -> DImplIntro (p h) (p h) (plouf p h)) 
+  | HoareSynConsequence p' p'' q' q'' c' hc vpp' vq'q ->
+   let impl3 = impl_wlp c' q' q'' vq'q in
+   let impl2 = wlp_weakest' c p'' q'' hc in
+   let vpwlp' = impl_comp p' p'' (wlp c q'') vpp' impl2 in
+   impl_comp p' (wlp c q'') (wlp c q') vpwlp' impl3  
+  | HoareSynSkip p' -> DForallIntro (pimpl p' p') (fun h -> DImplIntro (p' h) (p' h) (plouf p' h))
+  | HoareSynSeq p' c1 q' c2  r' hc1 hc2 -> 
+   let implqwlpc2 = wlp_weakest' c2 q' r' hc2 in
+   let implwlpc1 = impl_wlp c1 (wlp c2 r') q' implqwlpc2 in
+   let implpwlp = wlp_weakest' c1 p' q' hc1 in
+   impl_comp p' (wlp c1 q') (wlp c1 (wlp c2 r')) implpwlp implwlpc1
+  | HoareSynIf p' q' be ct ce hct hce -> 
+    let vimpltrue = wlp_weakest' ct (pand p' (bpred be)) q' hct in
+    let vimplfalse = wlp_weakest' ce (pand p' (pnot (bpred be))) q' hce in
+    if1 be ct ce p' q' vimpltrue vimplfalse 
+  | HoareSynWhile p be body hbody -> let vimplbody = wlp_weakest' body (pand p (bpred be)) p hbody in
+    let prop = DForallIntro (pimpl p (pand (pimpl (bpred be) (wlp body p)) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be)))))) (while6' be body p vimplbody) in
+magic()
+(*
+    DForallIntro (pimpl p  (pand p (fun _ -> pred_impl (p) (pand (pimpl (bpred be) (wlp body p) ) (pimpl (pnot (bpred be)) (pand p (pnot (bpred be))) )))) ) (while8' be body p vimplbody)
+*)
