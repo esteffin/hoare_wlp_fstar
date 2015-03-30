@@ -256,8 +256,8 @@ let hoare_skip p = fun h h' pr vph -> vph
 
 
 opaque val hoare_seq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred ->
-                       hpq : hoare p c1 q  ->
-                       hqr:hoare q c2 r    ->
+                       hpq : hoare p c1 q ->
+                       hqr:hoare q c2 r ->
                        Tot (hoare p (Seq c1 c2) r)
 let hoare_seq p c1 q c2 r hpq hqr =
     fun h1 h3 pr vph1 ->
@@ -284,21 +284,26 @@ let hoare_if p q be t e hthen helse =
 
 (* hoare_while is can only show the annotated invariant *)
 
-(* This hits two F* bugs, still waiting for a fix:
-   https://github.com/FStarLang/FStar/issues/195
-   https://github.com/FStarLang/FStar/issues/192 *)
+opaque val hoare_while_aux : p:pred -> be:bexp -> c:com ->
+                             hoare (pand p (bpred be)) c p ->
+                             #h:heap -> #h':heap ->
+                             pr:reval (While be c p) h h' ->
+                             deduce (p h) ->
+                             Tot (deduce ((pand p (pnot (bpred be))) h'))
+                                 (decreases pr)
+let rec hoare_while_aux p be c hbody h h' pr ph =
+  match pr with
+  | EWhileEnd be' c' p' ->
+     DAndIntro (p h) (fnot (FEq false true)) ph (DNotEq false true)
+  | EWhileLoop be' c' p' rbody rloop ->
+     (let vph1 = hbody rbody (DAndIntro (p h) (FEq true true) ph (DEqRefl true)) in
+      let ih = hoare_while_aux p be c hbody in
+      ih rloop vph1)
+
 opaque val hoare_while : p:pred -> be:bexp -> c:com ->
                          hoare (pand p (bpred be)) c p ->
                          Tot (hoare p (While be c p) (pand p (pnot (bpred be))))
-let (*rec*) hoare_while p be c hbody =
-  fun h h' pr (ph:deduce (p h)) ->
-  match pr with
-  | EWhileEnd  be cb i ->
-     (DAndIntro (p h) (fnot (FEq false true)) ph (DNotEq false true))
-  | EWhileLoop be cb i rbody rloop ->
-     let vph1 = hbody rbody (DAndIntro (p h) (FEq true true) ph (DEqRefl true)) in
-     (*hoare_while p be c hbody rbody vph1*)
-     magic()
+let hoare_while c p be hbody = hoare_while_aux c p be hbody
 
 
 (* Weakest Liberal Precondition (aka. predicate transformer semantics) *)
@@ -660,8 +665,8 @@ type hoare_syn : pred -> com -> pred -> Type =
   | HoareSynSkip : p:pred ->
                    Tot (hoare_syn p Skip p)
   | HoareSynSeq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred ->
-                  hoare_syn p c1 q  ->
-                  hoare_syn q c2 r    ->
+                  hoare_syn p c1 q ->
+                  hoare_syn q c2 r ->
                   Tot (hoare_syn p (Seq c1 c2) r)
   | HoareSynIf : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
                  hoare_syn (pand p (bpred be)) t q ->
