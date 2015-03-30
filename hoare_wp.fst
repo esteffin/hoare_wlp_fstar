@@ -622,33 +622,9 @@ let if1 be ct ce p q vimpltrue vimplfalse =
     DForallIntro (pimpl p (pif (bpred be) (wlp ct q) (wlp ce q)))
                  (if2 be ct ce p q vimpltrue vimplfalse)
 
-(* Syntactic Hoare triples (needed for wlp_weakest) *)
-
-type hoare_syn : pred -> com -> pred -> Type =
-  | HoareSynAssign : q:pred -> x:id -> e:aexp ->
-                     Tot (hoare_syn (pred_sub x e q) (Assign x e) q)
-  | HoareSynConsequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
-                          hoare_syn p' c q' ->
-                          deduce (pred_impl p p') ->
-                          deduce (pred_impl q' q) ->
-                          Tot (hoare_syn p c q)
-  | HoareSynSkip : p:pred ->
-                   Tot (hoare_syn p Skip p)
-  | HoareSynSeq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred ->
-                  hoare_syn p c1 q  ->
-                  hoare_syn q c2 r    ->
-                  Tot (hoare_syn p (Seq c1 c2) r)
-  | HoareIf : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
-              hoare_syn (pand p (bpred be))  t q ->
-              hoare_syn (pand p (pnot (bpred be))) e q ->
-              Tot (hoare_syn p (If be t e) q)
-  | HoareWhile : p:pred -> be:bexp -> c:com ->
-                 hoare_syn (pand p (bpred be)) c p ->
-                 Tot (hoare_syn p (While be c p) (pand p (pnot (bpred be))))
-
 opaque val wlp_weakest : c:com -> p:pred -> q:pred ->
                          hpcq:hoare p c q ->
-                         deduce (pred_impl p (wlp c q))
+                         Tot (deduce (pred_impl p (wlp c q))) (decreases c)
 let rec wlp_weakest c p q hpcq =
     match c with
       | Skip ->
@@ -668,3 +644,40 @@ let rec wlp_weakest c p q hpcq =
           if1 be ct ce p q vimpltrue vimplfalse
       (* It is anyway false for While *)
       | While be body i -> magic ()
+
+(* Syntactic Hoare triples (needed for wlp_weakest) *)
+
+type hoare_syn : pred -> com -> pred -> Type =
+  | HoareSynAssign : q:pred -> x:id -> e:aexp ->
+                     Tot (hoare_syn (pred_sub x e q) (Assign x e) q)
+  | HoareSynConsequence : p:pred -> p':pred -> q:pred -> q':pred -> c:com ->
+                          hoare_syn p' c q' ->
+                          deduce (pred_impl p p') ->
+                          deduce (pred_impl q' q) ->
+                          Tot (hoare_syn p c q)
+  | HoareSynSkip : p:pred ->
+                   Tot (hoare_syn p Skip p)
+  | HoareSynSeq : p:pred -> c1:com -> q:pred -> c2:com -> r:pred ->
+                  hoare_syn p c1 q  ->
+                  hoare_syn q c2 r    ->
+                  Tot (hoare_syn p (Seq c1 c2) r)
+  | HoareSynIf : p:pred -> q:pred -> be:bexp -> t:com -> e:com ->
+                 hoare_syn (pand p (bpred be)) t q ->
+                 hoare_syn (pand p (pnot (bpred be))) e q ->
+                 Tot (hoare_syn p (If be t e) q)
+  | HoareSynWhile : p:pred -> be:bexp -> c:com ->
+                    hoare_syn (pand p (bpred be)) c p ->
+                    Tot (hoare_syn p (While be c p) (pand p (pnot (bpred be))))
+
+(* CH: here is a version of wlp_weakest that has some chance of holding *)
+opaque val wlp_weakest' : c:com -> p:pred -> q:pred ->
+                         hpcq:hoare_syn p c q ->
+                         Tot (deduce (pred_impl p (wlp c q))) (decreases hpcq)
+let rec wlp_weakest' c p q hpcq =
+  match hpcq with
+  | HoareSynAssign q' x e -> magic()
+  | HoareSynConsequence p' p'' q' q'' c' hc hpp' hq'q -> magic()
+  | HoareSynSkip p' -> magic()
+  | HoareSynSeq p' c1 q' c2  r' hc1 hc2 -> magic()
+  | HoareSynIf p' q' be ct ce hct hce -> magic()
+  | HoareSynWhile i be body hbody -> magic()
