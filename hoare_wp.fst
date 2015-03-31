@@ -713,12 +713,29 @@ val impl_if : be : bexp -> ct : com -> ce : com ->
 	      deduce (wlp (If be ct ce) q h) ->
 	      Tot(deduce(wlp (If be ct ce) q' h))
 let impl_if be ct ce q q' h vimplwlp1 vimplwlp2 vqq' vwlpqh =
-let vimplwlp1h = DForallElim (pimpl (wlp ct q) (wlp ct q')) vimplwlp1 h in
-let vimplwlp2h = DForallElim (pimpl (wlp ce q) (wlp ce q')) vimplwlp2 h in
-let lhs = impl_comp_form (bpred be h) (wlp ct q h) (wlp ct q' h) (DAndElim1 (pimpl (bpred be) (wlp ct q) h) (pimpl (pnot (bpred be)) (wlp ce q) h) vwlpqh) vimplwlp1h in
-let rhs = impl_comp_form (pnot (bpred be) h) (wlp ce q h) (wlp ce q' h) (DAndElim2 (pimpl (bpred be) (wlp ct q) h) (pimpl (pnot (bpred be)) (wlp ce q) h) vwlpqh) vimplwlp2h in
-DAndIntro (pimpl (bpred be) (wlp ct q') h) (pimpl (pnot (bpred be)) (wlp ce q') h) lhs rhs
+  let vimplwlp1h = DForallElim (pimpl (wlp ct q) (wlp ct q')) vimplwlp1 h in
+  let vimplwlp2h = DForallElim (pimpl (wlp ce q) (wlp ce q')) vimplwlp2 h in
+  let lhs = impl_comp_form (bpred be h) (wlp ct q h) (wlp ct q' h) (DAndElim1 (pimpl (bpred be) (wlp ct q) h) (pimpl (pnot (bpred be)) (wlp ce q) h) vwlpqh) vimplwlp1h in
+  let rhs = impl_comp_form (pnot (bpred be) h) (wlp ce q h) (wlp ce q' h) (DAndElim2 (pimpl (bpred be) (wlp ct q) h) (pimpl (pnot (bpred be)) (wlp ce q) h) vwlpqh) vimplwlp2h in
+  DAndIntro (pimpl (bpred be) (wlp ct q') h) (pimpl (pnot (bpred be)) (wlp ce q') h) lhs rhs
 
+val impl_while2 : be : bexp -> body : com -> p : pred -> q : pred -> q' : pred -> vqq' : deduce (pred_impl q q') -> vpropq : deduce (pred_impl p (pif (bpred be) (wlp body p) q)) -> h : heap -> vph : deduce (p h) -> Tot(deduce (pif (bpred be) (wlp body p) q' h))
+let impl_while2 be body p q q' vqq' vpropq h vph = 
+let vpropqh = DForallElim (pimpl p (pif (bpred be) (wlp body p) q)) vpropq h in
+let vifqh = DImplElim (p h) (pif (bpred be) (wlp body p) q h) vpropqh vph in
+let lhs = DAndElim1 (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) q h) vifqh in
+let vimplq = DAndElim2 (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) q h) vifqh in
+let rhs = impl_comp_form (pnot (bpred be) h) (q h) (q' h) vimplq (DForallElim (pimpl q q') vqq' h) in
+DAndIntro (pimpl (bpred be) (wlp body p) h) (pimpl (pnot (bpred be)) q' h) lhs rhs
+
+val impl_while1 : be : bexp -> body : com -> p : pred -> q : pred -> q' : pred -> vqq' : deduce (pred_impl q q') -> h : heap -> vwlpqh : deduce (wlp (While be body p) q h ) -> Tot(deduce (wlp (While be body p) q' h))
+let impl_while1 be body p q q' vqq' h vwlpqh = 
+let vph = DAndElim1 (p h) (pred_impl p (pif (bpred be) (wlp body p) q)) vwlpqh in
+let vpropq = DAndElim2 (p h) (pred_impl p (pif (bpred be) (wlp body p) q)) vwlpqh in
+let vpropq' = DForallIntro (pimpl p (pif (bpred be) (wlp body p) q')) (fun h -> DImplIntro (p h) (pif (bpred be) (wlp body p) q' h) (impl_while2 be body p q q' vqq' vpropq h)) in
+DAndIntro (p h) (pred_impl p (pif (bpred be) (wlp body p) q')) vph vpropq'
+
+ 
 val impl_wlp : c:com -> q:pred -> q':pred ->
                       deduce (pred_impl q q') ->
                       Tot (deduce (pred_impl (wlp c q) (wlp c q')))
@@ -731,7 +748,7 @@ match c with
 | If be ct ce -> let vimplwlp1 = impl_wlp ct q q' vqq' in
                  let vimplwlp2 = impl_wlp ce q q' vqq' in
 		 DForallIntro (pimpl (wlp c q) (wlp c q')) (fun h -> DImplIntro (wlp c q h) (wlp c q' h) (impl_if be ct ce q q' h vimplwlp1 vimplwlp2 vqq'))
-| _ -> magic()
+| While be body p -> DForallIntro (pimpl (wlp c q) (wlp c q')) (fun h -> DImplIntro (wlp c q h) (wlp c q' h) (impl_while1 be body p q q' vqq' h))
 (*p,be |- wlp body p*)
 opaque val while1' : be : bexp -> body : com -> p : pred ->
                      deduce (pred_impl (pand p (bpred be)) (wlp body p)) ->
