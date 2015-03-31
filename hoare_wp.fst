@@ -675,17 +675,63 @@ type hoare_syn : pred -> com -> pred -> Type =
                     hoare_syn (pand p (bpred be)) c p ->
                     Tot (hoare_syn p (While be c p) (pand p (pnot (bpred be))))
 
-(* (q'=>q) => (wlp c q' => wlp c q) *)
-assume val impl_wlp : c:com -> q:pred -> q':pred ->
-                      deduce (pred_impl q' q) ->
-                      Tot (deduce (pred_impl (wlp c q') (wlp c q)))
+
+
+val impl_comp_aux : p1 : pred -> p2 : pred -> p3 : pred ->
+                    vp12 : deduce(pred_impl p1 p2) ->
+                    vp23 : deduce(pred_impl p2 p3) ->
+                    h : heap -> 
+		    vp1h : deduce (p1 h) ->
+                    Tot(deduce (p3 h))
+let impl_comp_aux p1 p2 p3 vp12 vp23 h vp1h =
+let vp12h = DForallElim (pimpl p1 p2) vp12 h in
+let vp23h = DForallElim (pimpl p2 p3) vp23 h in
+let vp2h = DImplElim (p1 h) (p2 h) vp12h vp1h in
+DImplElim (p2 h) (p3 h) vp23h vp2h
 
 (* (p1 => p2) -> (p2 => p3) -> (p1 => p3)*)
-assume val impl_comp : p1 : pred -> p2 : pred -> p3 : pred ->
+val impl_comp : p1 : pred -> p2 : pred -> p3 : pred ->
                        deduce (pred_impl p1 p2) ->
                        deduce (pred_impl p2 p3) ->
                        Tot (deduce (pred_impl p1 p3))
 
+let impl_comp p1 p2 p3 vp12 vp23 =
+DForallIntro (pimpl p1 p3) (fun (h:heap) -> DImplIntro (p1 h) (p3 h) (impl_comp_aux p1 p2 p3 vp12 vp23 h))
+(* (q'=>q) -> (wlp c q' => wlp c q) *)
+val impl_comp_form : f1 : form -> f2 : form -> f3 : form ->
+                     deduce (FImpl f1 f2) -> deduce (FImpl f2 f3) ->
+		     Tot(deduce (FImpl f1 f3))
+let impl_comp_form f1 f2 f3 vimpl12 vimpl23 =
+DImplIntro f1 f3 (fun vf1 -> let vf2 = DImplElim f1 f2 vimpl12 vf1 in
+    DImplElim f2 f3 vimpl23 vf2)
+
+val impl_if : be : bexp -> ct : com -> ce : com ->
+              q : pred -> q' : pred -> h : heap -> 
+	      deduce (pred_impl (wlp ct q) (wlp ct q')) ->
+	      deduce (pred_impl (wlp ce q) (wlp ce q')) ->
+	      deduce (pred_impl q q') ->
+	      deduce (wlp (If be ct ce) q h) ->
+	      Tot(deduce(wlp (If be ct ce) q' h))
+let impl_if be ct ce q q' h vimplwlp1 vimplwlp2 vqq' vwlpqh =
+let vimplwlp1h = DForallElim (pimpl (wlp ct q) (wlp ct q')) vimplwlp1 h in
+let vimplwlp2h = DForallElim (pimpl (wlp ce q) (wlp ce q')) vimplwlp2 h in
+let lhs = impl_comp_form (bpred be h) (wlp ct q h) (wlp ct q' h) (DAndElim1 (pimpl (bpred be) (wlp ct q) h) (pimpl (pnot (bpred be)) (wlp ce q) h) vwlpqh) vimplwlp1h in
+let rhs = impl_comp_form (pnot (bpred be) h) (wlp ce q h) (wlp ce q' h) (DAndElim2 (pimpl (bpred be) (wlp ct q) h) (pimpl (pnot (bpred be)) (wlp ce q) h) vwlpqh) vimplwlp2h in
+DAndIntro (pimpl (bpred be) (wlp ct q') h) (pimpl (pnot (bpred be)) (wlp ce q') h) lhs rhs
+
+val impl_wlp : c:com -> q:pred -> q':pred ->
+                      deduce (pred_impl q q') ->
+                      Tot (deduce (pred_impl (wlp c q) (wlp c q')))
+let rec impl_wlp c q q' vqq' =
+match c with 
+| Skip -> vqq'
+| Assign x e -> DForallIntro (pimpl (wlp c q) (wlp c q')) (fun h -> DForallElim (pimpl q q') vqq' (update h x (eval_aexp h e)))
+| Seq c1 c2 -> let vimplwlpc2 = impl_wlp c2 q q' vqq' in
+               impl_wlp c1 (wlp c2 q) (wlp c2 q') vimplwlpc2
+| If be ct ce -> let vimplwlp1 = impl_wlp ct q q' vqq' in
+                 let vimplwlp2 = impl_wlp ce q q' vqq' in
+		 DForallIntro (pimpl (wlp c q) (wlp c q')) (fun h -> DImplIntro (wlp c q h) (wlp c q' h) (impl_if be ct ce q q' h vimplwlp1 vimplwlp2 vqq'))
+| _ -> magic()
 (*p,be |- wlp body p*)
 opaque val while1' : be : bexp -> body : com -> p : pred ->
                      deduce (pred_impl (pand p (bpred be)) (wlp body p)) ->
@@ -784,7 +830,7 @@ let rec wlp_weakest' c p q hpcq =
   | HoareSynAssign q' x e ->
      DForallIntro (pimpl p p) (fun h -> DImplIntro (p h) (p h) (plouf p h))
   | HoareSynConsequence p' p'' q' q'' c' hc vpp' vq'q ->
-     let impl3 = impl_wlp c' q' q'' vq'q in
+     let impl3 = impl_wlp c' q'' q' vq'q in
      let impl2 = wlp_weakest' c p'' q'' hc in
      let vpwlp' = impl_comp p' p'' (wlp c q'') vpp' impl2 in
      impl_comp p' (wlp c q'') (wlp c q') vpwlp' impl3
@@ -792,7 +838,7 @@ let rec wlp_weakest' c p q hpcq =
      DForallIntro (pimpl p' p') (fun h -> DImplIntro (p' h) (p' h) (plouf p' h))
   | HoareSynSeq p' c1 q' c2  r' hc1 hc2 ->
      let implqwlpc2 = wlp_weakest' c2 q' r' hc2 in
-     let implwlpc1 = impl_wlp c1 (wlp c2 r') q' implqwlpc2 in
+     let implwlpc1 = impl_wlp c1 q' (wlp c2 r') implqwlpc2 in
      let implpwlp = wlp_weakest' c1 p' q' hc1 in
      impl_comp p' (wlp c1 q') (wlp c1 (wlp c2 r')) implpwlp implwlpc1
   | HoareSynIf p' q' be ct ce hct hce ->
