@@ -852,3 +852,15 @@ let rec wlp_weakest' c p q hpcq =
                                                    (pand p (pnot (bpred be))))))
                              (while6' be body p vimplbody) in
      DForallIntro (pimpl p (wlp c q)) (while8' be body p vimplbody)
+
+(* Seq case now trivial
+
+  {p} c1; c2 {q}  ==> {p} c1 {p'} and {p'} c2 {q}
+
+  IH1: p => wlp c1 p'
+  IH2: p' => wlp c2 q  =monotonicity=>  wlp c1 p' => wlp c1 (wlp c2 q)
+
+  TS: p => wlp (c1; c2) q
+  TS: p => wlp c1 (wlp c2 q)
+
+ *)
